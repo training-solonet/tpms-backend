@@ -7,8 +7,8 @@ require('dotenv').config();
 const pool = new Pool({
   user: process.env.DB_USER || 'postgres',
   host: process.env.DB_HOST || 'localhost',
-  database: 'postgres', // Connect to default database first
-  password: process.env.DB_PASSWORD || 'password',
+  database: 'fleet_management', // Connect to default database first
+  password: process.env.DB_PASSWORD || 'truk1234',
   port: process.env.DB_PORT || 5432,
 });
 
@@ -64,7 +64,7 @@ const getDbPool = () => {
     user: process.env.DB_USER || 'postgres',
     host: process.env.DB_HOST || 'localhost',
     database: dbName,
-    password: process.env.DB_PASSWORD || 'password',
+    password: process.env.DB_PASSWORD || 'truk1234',
     port: process.env.DB_PORT || 5432,
   });
 };
