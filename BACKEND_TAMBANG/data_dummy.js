@@ -25,16 +25,13 @@ const log = (message, color = 'reset') => {
   console.log(`${colors[color]}${message}${colors.reset}`);
 };
 
-// Realistic truck data arrays
-const truckModels = [
+// FIXED: Use only models that exist in database
+const existingTruckModels = [
   { name: '797F', manufacturer: 'Caterpillar', capacity: 400, fuelTank: 4540 },
   { name: '980E-4', manufacturer: 'Komatsu', capacity: 360, fuelTank: 4000 },
   { name: 'T284', manufacturer: 'Liebherr', capacity: 400, fuelTank: 4730 },
   { name: '789D', manufacturer: 'Caterpillar', capacity: 195, fuelTank: 2650 },
-  { name: '830E', manufacturer: 'Komatsu', capacity: 220, fuelTank: 3030 },
-  { name: 'MT6300AC', manufacturer: 'Caterpillar', capacity: 400, fuelTank: 4200 },
-  { name: '960E-2K', manufacturer: 'Komatsu', capacity: 290, fuelTank: 3800 },
-  { name: 'T282C', manufacturer: 'Liebherr', capacity: 363, fuelTank: 4160 }
+  { name: '830E', manufacturer: 'Komatsu', capacity: 220, fuelTank: 3030 }
 ];
 
 const driverNames = [
@@ -43,11 +40,7 @@ const driverNames = [
   'Kurnia Rahman', 'Lucky Hakim', 'Muhammad Rizki', 'Nanda Pratama', 'Oscar Simanjuntak',
   'Putra Mahendra', 'Qomar Hidayat', 'Rendi Sanjaya', 'Sandi Wibowo', 'Taufik Ismail',
   'Udin Sedunia', 'Vicky Ramadhan', 'Wahyu Santoso', 'Xavier Tobing', 'Yudi Pranata',
-  'Zainal Abidin', 'Agus Salim', 'Bambang Sutrisno', 'Catur Pamungkas', 'Dwi Cahyono',
-  'Erik Gunawan', 'Fadli Hassan', 'Gilang Ramadhan', 'Heri Suryanto', 'Ivan Kusuma',
-  'Jajang Nurjaman', 'Krisna Wijaya', 'Lutfi Hakim', 'Maman Suryaman', 'Noval Hidayat',
-  'Oki Prasetya', 'Pandu Wicaksono', 'Qadri Rahman', 'Reza Pahlevi', 'Soni Hermawan',
-  'Teguh Prayoga', 'Ucok Siagian', 'Vino Bastian', 'Wawan Setiawan', 'Yoga Pratama'
+  'Zainal Abidin', 'Agus Salim', 'Bambang Sutrisno', 'Catur Pamungkas', 'Dwi Cahyono'
 ];
 
 const alertTypes = [
@@ -93,8 +86,8 @@ const generateTruckData = () => {
       status = 'inactive';  
     }
     
-    // Random model
-    const model = truckModels[Math.floor(Math.random() * truckModels.length)];
+    // Random model - ONLY use existing models
+    const model = existingTruckModels[Math.floor(Math.random() * existingTruckModels.length)];
     
     // Random location within mining areas
     const areas = Object.values(miningAreas);
@@ -189,11 +182,6 @@ const generateTruckData = () => {
       tirePressures: tirePressures,
       alerts: alerts,
       lastUpdate: new Date(Date.now() - Math.random() * 300000), // Last 5 minutes
-      // Additional realistic fields
-      fuelConsumption: Math.round((15 + Math.random() * 25) * 10) / 10, // L/hour
-      averageSpeed: Math.round((status === 'active' ? 20 + Math.random() * 15 : 0) * 10) / 10,
-      totalDistance: Math.round((Math.random() * 500) * 10) / 10, // km today
-      workingHours: status === 'active' ? Math.round((4 + Math.random() * 8) * 10) / 10 : 0,
       currentZone: area.name
     };
     
@@ -211,19 +199,20 @@ const ensureTruckModels = async () => {
     const existingModels = await pool.query('SELECT COUNT(*) FROM truck_models');
     const count = parseInt(existingModels.rows[0].count);
     
-    if (count === 0) {
-      log('Inserting truck models...', 'yellow');
+    log(`✓ Found ${count} existing truck models`, 'green');
+    
+    if (count < 5) {
+      log('Inserting missing truck models...', 'yellow');
       
-      for (const model of truckModels) {
+      for (const model of existingTruckModels) {
         await pool.query(`
-          INSERT INTO truck_models (name, manufacturer, capacity_tons, fuel_tank_capacity)
-          VALUES ($1, $2, $3, $4)
+          INSERT INTO truck_models (name, manufacturer, capacity_tons, fuel_tank_capacity, tire_count)
+          VALUES ($1, $2, $3, $4, 6)
+          ON CONFLICT DO NOTHING
         `, [model.name, model.manufacturer, model.capacity, model.fuelTank]);
       }
       
-      log(`✓ ${truckModels.length} truck models inserted!`, 'green');
-    } else {
-      log(`✓ Found ${count} existing truck models`, 'green');
+      log(`✓ ${existingTruckModels.length} truck models ensured!`, 'green');
     }
   } catch (error) {
     log(`Error with truck models: ${error.message}`, 'red');
@@ -237,9 +226,16 @@ const clearExistingData = async () => {
   
   try {
     await pool.query('DELETE FROM location_history');
-    await pool.query('DELETE FROM truck_alerts');  
+    log('✓ Cleared location_history', 'green');
+    
+    await pool.query('DELETE FROM truck_alerts');
+    log('✓ Cleared truck_alerts', 'green');
+    
     await pool.query('DELETE FROM tire_pressures');
+    log('✓ Cleared tire_pressures', 'green');
+    
     await pool.query('DELETE FROM trucks');
+    log('✓ Cleared trucks', 'green');
     
     log('✓ Existing data cleared!', 'green');
   } catch (error) {
@@ -248,76 +244,113 @@ const clearExistingData = async () => {
   }
 };
 
-// Insert trucks in batches
+// FIXED: Insert trucks in batches with proper parameter handling
 const insertTrucks = async (trucks) => {
   log('Inserting 1000 trucks...', 'yellow');
   
   try {
-    // Get truck model IDs
+    // Get truck model IDs from database
     const modelsResult = await pool.query('SELECT id, name, manufacturer FROM truck_models');
     const modelMap = {};
     modelsResult.rows.forEach(row => {
-      modelMap[`${row.manufacturer}-${row.name}`] = row.id;
+      const key = `${row.manufacturer}-${row.name}`;
+      modelMap[key] = row.id;
+      log(`  Model: ${key} = ID ${row.id}`, 'cyan');
     });
     
-    const batchSize = 100;
+    const batchSize = 25; // SMALLER batch size to avoid parameter issues
     const totalBatches = Math.ceil(trucks.length / batchSize);
+    
+    log('Using separate latitude/longitude columns', 'cyan');
+    
+    let successfulInserts = 0;
     
     for (let batch = 0; batch < totalBatches; batch++) {
       const startIdx = batch * batchSize;
       const endIdx = Math.min(startIdx + batchSize, trucks.length);
       const batchTrucks = trucks.slice(startIdx, endIdx);
       
+      // Filter out trucks with unknown models
+      const validTrucks = batchTrucks.filter(truck => {
+        const modelKey = `${truck.model.manufacturer}-${truck.model.name}`;
+        const hasModel = modelMap[modelKey];
+        if (!hasModel) {
+          log(`Skipping truck ${truck.truckNumber} - model ${modelKey} not found`, 'yellow');
+        }
+        return hasModel;
+      });
+      
+      if (validTrucks.length === 0) {
+        log(`Batch ${batch + 1}/${totalBatches} - no valid trucks to insert`, 'yellow');
+        continue;
+      }
+      
+      // Build query with proper parameters
       const values = [];
       const placeholders = [];
       
-      batchTrucks.forEach((truck, index) => {
+      validTrucks.forEach((truck, index) => {
         const modelKey = `${truck.model.manufacturer}-${truck.model.name}`;
         const modelId = modelMap[modelKey];
         
-        const baseIndex = index * 12;
-        placeholders.push(`($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, 
-          ST_SetSRID(ST_MakePoint($${baseIndex + 4}, $${baseIndex + 5}), 4326), 
-          $${baseIndex + 6}, $${baseIndex + 7}, $${baseIndex + 8}, $${baseIndex + 9}, 
-          $${baseIndex + 10}, $${baseIndex + 11}, $${baseIndex + 12}, $${baseIndex + 13})`);
+        const paramOffset = index * 13; // 13 fields per truck
+        placeholders.push(`(
+          $${paramOffset + 1}, $${paramOffset + 2}, $${paramOffset + 3}, 
+          $${paramOffset + 4}, $${paramOffset + 5}, $${paramOffset + 6}, 
+          $${paramOffset + 7}, $${paramOffset + 8}, $${paramOffset + 9}, 
+          $${paramOffset + 10}, $${paramOffset + 11}, $${paramOffset + 12}, $${paramOffset + 13}
+        )`);
         
         values.push(
-          truck.truckNumber,
-          modelId,
-          truck.status,
-          truck.location.coordinates[0], // longitude
-          truck.location.coordinates[1], // latitude  
-          truck.speed,
-          truck.heading,
-          truck.fuel,
-          truck.payload,
-          truck.driver,
-          truck.engineHours,
-          truck.odometer,
-          truck.lastMaintenance
+          truck.truckNumber,           // $1
+          modelId,                     // $2
+          truck.status,                // $3
+          truck.location.coordinates[1], // latitude $4
+          truck.location.coordinates[0], // longitude $5
+          truck.speed,                 // $6
+          truck.heading,               // $7
+          truck.fuel,                  // $8
+          truck.payload,               // $9
+          truck.driver,                // $10
+          truck.engineHours,           // $11
+          truck.odometer,              // $12
+          truck.lastMaintenance        // $13
         );
       });
       
+      if (values.length === 0) {
+        continue;
+      }
+      
       const insertQuery = `
         INSERT INTO trucks (
-          truck_number, model_id, status, current_location, speed,
-          heading, fuel_percentage, payload_tons, driver_name,
+          truck_number, model_id, status, latitude, longitude, speed, 
+          heading, fuel_percentage, payload_tons, driver_name, 
           engine_hours, odometer, last_maintenance
         ) VALUES ${placeholders.join(', ')}
         RETURNING id, truck_number
       `;
       
-      const result = await pool.query(insertQuery, values);
-      
-      // Store truck IDs for later use
-      result.rows.forEach((row, index) => {
-        batchTrucks[index].dbId = row.id;
-      });
-      
-      log(`✓ Batch ${batch + 1}/${totalBatches} trucks inserted (${result.rows.length} trucks)`, 'cyan');
+      try {
+        const result = await pool.query(insertQuery, values);
+        
+        // Store truck IDs for later use
+        result.rows.forEach((row, index) => {
+          if (validTrucks[index]) {
+            validTrucks[index].dbId = row.id;
+          }
+        });
+        
+        successfulInserts += result.rows.length;
+        log(`✓ Batch ${batch + 1}/${totalBatches} inserted (${result.rows.length} trucks)`, 'cyan');
+        
+      } catch (error) {
+        log(`Error in batch ${batch + 1}: ${error.message}`, 'red');
+        log(`Parameters count: ${values.length}, Expected: ${validTrucks.length * 13}`, 'red');
+      }
     }
     
-    log('✅ All 1000 trucks inserted successfully!', 'green');
+    log(`✅ ${successfulInserts} trucks inserted successfully!`, 'green');
     return trucks;
     
   } catch (error) {
@@ -331,22 +364,31 @@ const insertTirePressures = async (trucks) => {
   log('Inserting tire pressure data...', 'yellow');
   
   try {
-    const batchSize = 200; // 200 trucks at a time
-    const totalBatches = Math.ceil(trucks.length / batchSize);
+    const trucksWithIds = trucks.filter(truck => truck.dbId);
+    
+    if (trucksWithIds.length === 0) {
+      log('No trucks with IDs found, skipping tire pressures', 'yellow');
+      return;
+    }
+    
+    const batchSize = 50; // 50 trucks at a time
+    const totalBatches = Math.ceil(trucksWithIds.length / batchSize);
     
     for (let batch = 0; batch < totalBatches; batch++) {
       const startIdx = batch * batchSize;
-      const endIdx = Math.min(startIdx + batchSize, trucks.length);
-      const batchTrucks = trucks.slice(startIdx, endIdx);
+      const endIdx = Math.min(startIdx + batchSize, trucksWithIds.length);
+      const batchTrucks = trucksWithIds.slice(startIdx, endIdx);
       
       const values = [];
       const placeholders = [];
       
       batchTrucks.forEach(truck => {
-        truck.tirePressures.forEach(tire => {
-          const baseIndex = values.length;
-          placeholders.push(`($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, 
-            $${baseIndex + 4}, $${baseIndex + 5}, $${baseIndex + 6})`);
+        truck.tirePressures.forEach((tire, tireIndex) => {
+          const paramOffset = values.length;
+          placeholders.push(`(
+            $${paramOffset + 1}, $${paramOffset + 2}, $${paramOffset + 3}, 
+            $${paramOffset + 4}, $${paramOffset + 5}, $${paramOffset + 6}
+          )`);
           
           values.push(
             truck.dbId,
@@ -358,6 +400,10 @@ const insertTirePressures = async (trucks) => {
           );
         });
       });
+      
+      if (values.length === 0) {
+        continue;
+      }
       
       const insertQuery = `
         INSERT INTO tire_pressures (
@@ -383,16 +429,23 @@ const insertAlerts = async (trucks) => {
   log('Inserting truck alerts...', 'yellow');
   
   try {
-    const trucksWithAlerts = trucks.filter(truck => truck.alerts.length > 0);
+    const trucksWithAlerts = trucks.filter(truck => truck.alerts.length > 0 && truck.dbId);
+    
+    if (trucksWithAlerts.length === 0) {
+      log('No trucks with alerts found', 'yellow');
+      return;
+    }
     
     const values = [];
     const placeholders = [];
     
     trucksWithAlerts.forEach(truck => {
       truck.alerts.forEach(alert => {
-        const baseIndex = values.length;
-        placeholders.push(`($${baseIndex + 1}, $${baseIndex + 2}, $${baseIndex + 3}, 
-          $${baseIndex + 4}, $${baseIndex + 5}, $${baseIndex + 6})`);
+        const paramOffset = values.length;
+        placeholders.push(`(
+          $${paramOffset + 1}, $${paramOffset + 2}, $${paramOffset + 3}, 
+          $${paramOffset + 4}, $${paramOffset + 5}, $${paramOffset + 6}
+        )`);
         
         values.push(
           truck.dbId,
@@ -405,19 +458,15 @@ const insertAlerts = async (trucks) => {
       });
     });
     
-    if (values.length > 0) {
-      const insertQuery = `
-        INSERT INTO truck_alerts (
-          truck_id, alert_type, severity, message, is_resolved, created_at
-        ) VALUES ${placeholders.join(', ')}
-      `;
-      
-      await pool.query(insertQuery, values);
-      
-      log(`✅ ${values.length / 6} alerts inserted for ${trucksWithAlerts.length} trucks!`, 'green');
-    } else {
-      log('No alerts to insert', 'yellow');
-    }
+    const insertQuery = `
+      INSERT INTO truck_alerts (
+        truck_id, alert_type, severity, message, is_resolved, created_at
+      ) VALUES ${placeholders.join(', ')}
+    `;
+    
+    await pool.query(insertQuery, values);
+    
+    log(`✅ ${values.length / 6} alerts inserted for ${trucksWithAlerts.length} trucks!`, 'green');
     
   } catch (error) {
     log(`Error inserting alerts: ${error.message}`, 'red');
@@ -430,61 +479,70 @@ const insertLocationHistory = async (trucks) => {
   log('Inserting location history...', 'yellow');
   
   try {
-    const activeTrucks = trucks.filter(truck => truck.status === 'active');
+    const activeTrucks = trucks.filter(truck => truck.status === 'active' && truck.dbId);
     log(`Generating history for ${activeTrucks.length} active trucks...`, 'cyan');
     
-    const values = [];
-    const placeholders = [];
+    if (activeTrucks.length === 0) {
+      log('No active trucks found', 'yellow');
+      return;
+    }
     
-    activeTrucks.forEach(truck => {
-      // Generate 24 hours of history (every 30 minutes = 48 points)
-      for (let hour = 0; hour < 48; hour++) {
-        const timestamp = new Date();
-        timestamp.setMinutes(timestamp.getMinutes() - (hour * 30));
-        
-        // Create movement pattern around current location
-        const currentLng = truck.location.coordinates[0];
-        const currentLat = truck.location.coordinates[1];
-        
-        // Realistic movement (within 0.01 degrees ~1km radius)
-        const movementRadius = 0.01;
-        const angle = Math.random() * 2 * Math.PI;
-        const distance = Math.random() * movementRadius;
-        
-        const lng = currentLng + (distance * Math.cos(angle));
-        const lat = currentLat + (distance * Math.sin(angle));
-        
-        const speed = Math.round((10 + Math.random() * 50) * 10) / 10; // 10-60 km/h
-        const heading = Math.round(Math.random() * 360);
-        const fuel = Math.max(10, truck.fuel + (Math.random() - 0.7) * 2); // Gradual fuel decrease
-        
-        const baseIndex = values.length;
-        placeholders.push(`($${baseIndex + 1}, ST_SetSRID(ST_MakePoint($${baseIndex + 2}, $${baseIndex + 3}), 4326), 
-          $${baseIndex + 4}, $${baseIndex + 5}, $${baseIndex + 6}, $${baseIndex + 7})`);
-        
-        values.push(truck.dbId, lng, lat, speed, heading, fuel, timestamp);
-      }
-    });
+    // Process in smaller batches
+    const truckBatchSize = 10; // Process 10 trucks at a time
+    const totalTruckBatches = Math.ceil(activeTrucks.length / truckBatchSize);
     
-    // Insert in smaller batches to avoid memory issues
-    const batchSize = 2000; // 2000 records at a time
-    const totalBatches = Math.ceil(placeholders.length / batchSize);
-    
-    for (let batch = 0; batch < totalBatches; batch++) {
-      const startIdx = batch * batchSize;
-      const endIdx = Math.min(startIdx + batchSize, placeholders.length);
+    for (let truckBatch = 0; truckBatch < totalTruckBatches; truckBatch++) {
+      const startIdx = truckBatch * truckBatchSize;
+      const endIdx = Math.min(startIdx + truckBatchSize, activeTrucks.length);
+      const batchTrucks = activeTrucks.slice(startIdx, endIdx);
       
-      const batchPlaceholders = placeholders.slice(startIdx, endIdx);
-      const batchValues = values.slice(startIdx * 7, endIdx * 7);
+      const values = [];
+      const placeholders = [];
+      
+      batchTrucks.forEach(truck => {
+        // Generate 24 hours of history (every 2 hours = 12 points to reduce data)
+        for (let hour = 0; hour < 12; hour++) {
+          const timestamp = new Date();
+          timestamp.setHours(timestamp.getHours() - (hour * 2));
+          
+          // Create movement pattern around current location
+          const currentLng = truck.location.coordinates[0];
+          const currentLat = truck.location.coordinates[1];
+          
+          // Realistic movement (within 0.01 degrees ~1km radius)
+          const movementRadius = 0.01;
+          const angle = Math.random() * 2 * Math.PI;
+          const distance = Math.random() * movementRadius;
+          
+          const lng = currentLng + (distance * Math.cos(angle));
+          const lat = currentLat + (distance * Math.sin(angle));
+          
+          const speed = Math.round((10 + Math.random() * 50) * 10) / 10;
+          const heading = Math.round(Math.random() * 360);
+          const fuel = Math.max(10, truck.fuel + (Math.random() - 0.7) * 2);
+          
+          const paramOffset = values.length;
+          placeholders.push(`(
+            $${paramOffset + 1}, $${paramOffset + 2}, $${paramOffset + 3}, 
+            $${paramOffset + 4}, $${paramOffset + 5}, $${paramOffset + 6}, $${paramOffset + 7}
+          )`);
+          
+          values.push(truck.dbId, lat, lng, speed, heading, fuel, timestamp);
+        }
+      });
+      
+      if (values.length === 0) {
+        continue;
+      }
       
       const insertQuery = `
-        INSERT INTO location_history (truck_id, location, speed, heading, fuel_percentage, recorded_at)
-        VALUES ${batchPlaceholders.join(', ')}
+        INSERT INTO location_history (truck_id, latitude, longitude, speed, heading, fuel_percentage, recorded_at)
+        VALUES ${placeholders.join(', ')}
       `;
       
-      await pool.query(insertQuery, batchValues);
+      await pool.query(insertQuery, values);
       
-      log(`✓ Location history batch ${batch + 1}/${totalBatches} inserted`, 'cyan');
+      log(`✓ Location history batch ${truckBatch + 1}/${totalTruckBatches} inserted`, 'cyan');
     }
     
     log(`✅ Location history inserted for ${activeTrucks.length} active trucks!`, 'green');
@@ -492,38 +550,6 @@ const insertLocationHistory = async (trucks) => {
   } catch (error) {
     log(`Error inserting location history: ${error.message}`, 'red');
     throw error;
-  }
-};
-
-// Generate and save to JSON file for testing
-const saveToJsonFile = (trucks) => {
-  const fs = require('fs');
-  
-  log('Saving data to JSON file...', 'yellow');
-  
-  try {
-    const jsonData = {
-      metadata: {
-        totalTrucks: trucks.length,
-        generatedAt: new Date().toISOString(),
-        summary: {
-          active: trucks.filter(t => t.status === 'active').length,
-          inactive: trucks.filter(t => t.status === 'inactive').length,
-          maintenance: trucks.filter(t => t.status === 'maintenance').length,
-          withAlerts: trucks.filter(t => t.alerts.length > 0).length,
-          lowTirePressure: trucks.filter(t => 
-            t.tirePressures.some(tire => tire.status === 'low')
-          ).length
-        }
-      },
-      trucks: trucks
-    };
-    
-    fs.writeFileSync('dummy-trucks-data.json', JSON.stringify(jsonData, null, 2));
-    log('✅ Data saved to dummy-trucks-data.json', 'green');
-    
-  } catch (error) {
-    log(`Error saving JSON: ${error.message}`, 'red');
   }
 };
 
@@ -553,11 +579,6 @@ const generateAndInsertDummyData = async (saveJson = false) => {
     await insertTirePressures(trucksWithIds);
     await insertAlerts(trucksWithIds);
     await insertLocationHistory(trucksWithIds);
-    
-    // Save to JSON if requested
-    if (saveJson) {
-      saveToJsonFile(trucks);
-    }
     
     // Final verification and summary
     const stats = await pool.query(`
@@ -604,8 +625,7 @@ const generateAndInsertDummyData = async (saveJson = false) => {
 // Export functions for use in other scripts
 module.exports = {
   generateTruckData,
-  generateAndInsertDummyData,
-  saveToJsonFile
+  generateAndInsertDummyData
 };
 
 // Run if executed directly

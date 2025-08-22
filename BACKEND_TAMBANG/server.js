@@ -8,10 +8,13 @@ require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
+
+// Update CORS configuration untuk mengizinkan akses dari IP manapun
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:5173", // Vite default port
-    methods: ["GET", "POST"]
+    origin: "*", // Atau specify IP range: ["http://192.168.1.*", "http://localhost:5173"]
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
@@ -24,9 +27,21 @@ const pool = new Pool({
   port: process.env.DB_PORT || 5432,
 });
 
-// Middleware
-app.use(cors());
+// Middleware - Update CORS untuk network access
+app.use(cors({
+  origin: "*", // Izinkan dari semua origin untuk testing
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
+}));
+
 app.use(express.json());
+
+// Add logging middleware untuk debugging
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url} from ${req.ip}`);
+  next();
+});
 
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || 'fleet_secret_key_2024';
@@ -54,6 +69,37 @@ const authenticateToken = (req, res, next) => {
     next();
   });
 };
+
+// Add health check endpoint tanpa auth
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Fleet Management Server is running',
+    timestamp: new Date().toISOString(),
+    server_ip: req.socket.localAddress,
+    client_ip: req.ip
+  });
+});
+
+// Add root endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Fleet Management API Server',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      auth: '/api/auth/login',
+      trucks: '/api/trucks',
+      dashboard: '/api/dashboard/stats'
+    },
+    server_info: {
+      server_ip: req.socket.localAddress,
+      client_ip: req.ip,
+      timestamp: new Date().toISOString()
+    }
+  });
+});
 
 // Generate dummy data for 1000 trucks
 const generateDummyTrucks = () => {
@@ -473,7 +519,7 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  console.log(`User ${socket.user.username} connected`);
+  console.log(`User ${socket.user.username} connected from ${socket.handshake.address}`);
   
   socket.on('subscribeToTruckUpdates', () => {
     socket.join('truckUpdates');
@@ -547,15 +593,38 @@ app.use((err, req, res, next) => {
 app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
-    message: 'Endpoint not found'
+    message: 'Endpoint not found',
+    available_endpoints: {
+      health: '/health',
+      root: '/',
+      auth: '/api/auth/login',
+      trucks: '/api/trucks',
+      dashboard: '/api/dashboard/stats'
+    }
   });
 });
 
 const PORT = process.env.PORT || 3001;
+const HOST = '0.0.0.0'; // Listen on all network interfaces
 
-server.listen(PORT, () => {
-  console.log(`Fleet Management Server running on port ${PORT}`);
-  console.log(`WebSocket server ready for real-time tracking`);
+server.listen(PORT, HOST, () => {
+  console.log(`🚛 Fleet Management Server running on http://${HOST}:${PORT}`);
+  console.log(`📡 WebSocket server ready for real-time tracking`);
+  console.log(`🌐 Server accessible from network at http://[YOUR_IP]:${PORT}`);
+  
+  // Show network interfaces
+  const os = require('os');
+  const interfaces = os.networkInterfaces();
+  console.log('\n📋 Available network addresses:');
+  
+  for (const name of Object.keys(interfaces)) {
+    for (const interface of interfaces[name]) {
+      if (interface.family === 'IPv4' && !interface.internal) {
+        console.log(`   • http://${interface.address}:${PORT}`);
+      }
+    }
+  }
+  console.log('');
   
   // Start real-time simulation
   simulateRealTimeUpdates();
