@@ -225,7 +225,7 @@ app.get('/api/trucks', authenticateToken, async (req, res) => {
         (SELECT COUNT(*) FROM truck_alerts ta WHERE ta.truck_id = t.id AND ta.is_resolved = false) as alert_count
       FROM trucks t
       LEFT JOIN truck_models tm ON t.model_id = tm.id
-      WHERE 1=1
+      WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
     `;
     
     const queryParams = [];
@@ -288,15 +288,15 @@ app.get('/api/trucks', authenticateToken, async (req, res) => {
       status: row.status,
       location: {
         type: 'Point',
-        coordinates: [parseFloat(row.longitude), parseFloat(row.latitude)]
+        coordinates: [parseFloat(row.longitude || 0), parseFloat(row.latitude || 0)]
       },
       speed: parseFloat(row.speed) || 0,
-      heading: row.heading || 0,
+      heading: parseInt(row.heading) || 0,
       fuel: parseFloat(row.fuel) || 0,
       payload: parseFloat(row.payload) || 0,
       driver: row.driver,
-      engineHours: row.engineHours || 0,
-      odometer: row.odometer || 0,
+      engineHours: parseInt(row.engineHours) || 0,
+      odometer: parseInt(row.odometer) || 0,
       lastMaintenance: row.lastMaintenance,
       lastUpdate: row.lastUpdate,
       alerts: [],
@@ -425,15 +425,15 @@ app.get('/api/trucks/:id', authenticateToken, async (req, res) => {
       status: row.status,
       location: {
         type: 'Point',
-        coordinates: [parseFloat(row.longitude), parseFloat(row.latitude)]
+        coordinates: [parseFloat(row.longitude || 0), parseFloat(row.latitude || 0)]
       },
       speed: parseFloat(row.speed) || 0,
-      heading: row.heading || 0,
+      heading: parseInt(row.heading) || 0,
       fuel: parseFloat(row.fuel) || 0,
       payload: parseFloat(row.payload) || 0,
       driver: row.driver,
-      engineHours: row.engineHours || 0,
-      odometer: row.odometer || 0,
+      engineHours: parseInt(row.engineHours) || 0,
+      odometer: parseInt(row.odometer) || 0,
       lastMaintenance: row.lastMaintenance,
       lastUpdate: row.lastUpdate,
       tirePressures: tireResult.rows,
@@ -572,7 +572,7 @@ app.get('/api/trucks/realtime/locations', authenticateToken, async (req, res) =>
           model: row.model,
           status: row.status,
           speed: parseFloat(row.speed) || 0,
-          heading: row.heading || 0,
+          heading: parseInt(row.heading) || 0,
           fuel: parseFloat(row.fuel) || 0,
           payload: parseFloat(row.payload) || 0,
           driver: row.driver,
@@ -581,7 +581,7 @@ app.get('/api/trucks/realtime/locations', authenticateToken, async (req, res) =>
         },
         geometry: {
           type: "Point",
-          coordinates: [parseFloat(row.longitude), parseFloat(row.latitude)]
+          coordinates: [parseFloat(row.longitude || 0), parseFloat(row.latitude || 0)]
         }
       }))
     };
@@ -751,15 +751,23 @@ io.on('connection', (socket) => {
   });
 });
 
-// Simulate real-time truck movement and updates - UPDATE DATABASE
+// FIXED: Simulate real-time truck movement and updates - UPDATE DATABASE
 const simulateRealTimeUpdates = () => {
   setInterval(async () => {
     try {
       // Get random active trucks to update
       const trucksQuery = `
-        SELECT id, latitude, longitude, fuel_percentage, speed, heading
+        SELECT 
+          id, 
+          longitude, 
+          latitude, 
+          fuel_percentage, 
+          speed, 
+          heading
         FROM trucks 
         WHERE status = 'active' 
+        AND latitude IS NOT NULL 
+        AND longitude IS NOT NULL
         ORDER BY RANDOM() 
         LIMIT $1
       `;
@@ -768,37 +776,65 @@ const simulateRealTimeUpdates = () => {
       const result = await pool.query(trucksQuery, [trucksToUpdate]);
       
       for (const truck of result.rows) {
+        // Ensure all values are properly parsed and within bounds
+        const currentLng = parseFloat(truck.longitude) || 107.15;
+        const currentLat = parseFloat(truck.latitude) || -6.75;
+        const currentFuel = parseFloat(truck.fuel_percentage) || 50;
+        const currentSpeed = parseFloat(truck.speed) || 0;
+        const currentHeading = parseInt(truck.heading) || 0;
+        
         // Simulate movement (small random displacement)
-        const currentLng = parseFloat(truck.longitude);
-        const currentLat = parseFloat(truck.latitude);
+        const newLng = Math.round((currentLng + (Math.random() - 0.5) * 0.001) * 100000) / 100000;
+        const newLat = Math.round((currentLat + (Math.random() - 0.5) * 0.001) * 100000) / 100000;
         
-        const newLng = currentLng + (Math.random() - 0.5) * 0.001;
-        const newLat = currentLat + (Math.random() - 0.5) * 0.001;
-        const newSpeed = Math.round(Math.random() * 60);
-        const newHeading = (truck.heading + (Math.random() - 0.5) * 30) % 360;
-        const newFuel = Math.max(0, truck.fuel_percentage - Math.random() * 0.5);
+        // Ensure bounds are within mining area
+        const boundedLng = Math.max(107.1, Math.min(107.2, newLng));
+        const boundedLat = Math.max(-6.8, Math.min(-6.7, newLat));
         
-        // Update truck in database
+        // Generate new values with proper bounds and types
+        const newSpeed = Math.round(Math.random() * 60); // 0-60 km/h as integer
+        const newHeading = Math.round((currentHeading + (Math.random() - 0.5) * 30) % 360); // Keep within 0-359
+        const newFuel = Math.round((Math.max(0, currentFuel - Math.random() * 0.5)) * 100) / 100; // Decimal with 2 places
+        
+        // Ensure heading is positive
+        const finalHeading = newHeading < 0 ? newHeading + 360 : newHeading;
+        
+        // Update truck in database with proper data types
         await pool.query(`
           UPDATE trucks 
-          SET latitude = $1, longitude = $2, speed = $3, heading = $4, 
-              fuel_percentage = $5, updated_at = CURRENT_TIMESTAMP
+          SET 
+            longitude = $1,
+            latitude = $2,
+            speed = $3, 
+            heading = $4, 
+            fuel_percentage = $5, 
+            updated_at = CURRENT_TIMESTAMP
           WHERE id = $6
-        `, [newLat, newLng, newSpeed, newHeading, newFuel, truck.id]);
+        `, [
+          boundedLng,           // DECIMAL longitude
+          boundedLat,           // DECIMAL latitude  
+          newSpeed,             // INTEGER speed
+          finalHeading,         // INTEGER heading (0-359)
+          newFuel,              // DECIMAL fuel percentage
+          truck.id              // INTEGER truck id
+        ]);
         
-        // Occasionally update tire pressures
+        // Occasionally update tire pressures (10% chance)
         if (Math.random() < 0.1) {
+          const pressureChange = Math.round((Math.random() - 0.5) * 4 * 10) / 10; // -2.0 to +2.0 PSI
+          
           await pool.query(`
             UPDATE tire_pressures 
-            SET pressure_psi = pressure_psi + ($1), 
-                status = CASE 
-                  WHEN pressure_psi + ($1) < 80 THEN 'low'
-                  WHEN pressure_psi + ($1) > 120 THEN 'high'
-                  ELSE 'normal'
-                END,
-                recorded_at = CURRENT_TIMESTAMP
+            SET 
+              pressure_psi = GREATEST(50, LEAST(150, pressure_psi + $1)),
+              status = CASE 
+                WHEN pressure_psi + $1 < 80 THEN 'low'
+                WHEN pressure_psi + $1 > 120 THEN 'high'
+                ELSE 'normal'
+              END,
+              recorded_at = CURRENT_TIMESTAMP
             WHERE truck_id = $2
-          `, [(Math.random() - 0.5) * 2, truck.id]);
+          `, [pressureChange, truck.id]);
         }
       }
       
@@ -810,6 +846,11 @@ const simulateRealTimeUpdates = () => {
       
     } catch (error) {
       console.error('Error updating real-time data:', error);
+      // Log detailed error for debugging
+      if (error.code) {
+        console.error(`Database Error Code: ${error.code}`);
+        console.error(`Error Detail: ${error.detail}`);
+      }
     }
   }, 5000); // Update every 5 seconds
 };
