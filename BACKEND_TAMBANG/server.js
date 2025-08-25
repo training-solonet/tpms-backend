@@ -23,9 +23,20 @@ const pool = new Pool({
   user: process.env.DB_USER || 'postgres',
   host: process.env.DB_HOST || 'localhost',
   database: process.env.DB_NAME || 'fleet_management',
-  password: process.env.DB_PASSWORD || 'password',
+  password: process.env.DB_PASSWORD || 'truk1234',
   port: process.env.DB_PORT || 5432,
 });
+
+// Test database connection on startup
+pool.connect()
+  .then(client => {
+    console.log('✅ Database connected successfully');
+    client.release();
+  })
+  .catch(err => {
+    console.error('❌ Database connection error:', err.message);
+    process.exit(1);
+  });
 
 // Middleware - Update CORS untuk network access
 app.use(cors({
@@ -101,66 +112,7 @@ app.get('/', (req, res) => {
   });
 });
 
-// Generate dummy data for 1000 trucks
-const generateDummyTrucks = () => {
-  const trucks = [];
-  const statuses = ['active', 'inactive', 'maintenance'];
-  const models = ['CAT 797F', 'Komatsu 980E', 'Liebherr T284', 'CAT 789D', 'Komatsu 830E'];
-  
-  // Mining area boundaries (example coordinates for a large mining site)
-  const miningBounds = {
-    minLat: -6.8000,
-    maxLat: -6.7000,
-    minLng: 107.1000,
-    maxLng: 107.2000
-  };
-
-  for (let i = 1; i <= 1000; i++) {
-    const status = statuses[Math.floor(Math.random() * statuses.length)];
-    const lat = miningBounds.minLat + Math.random() * (miningBounds.maxLat - miningBounds.minLat);
-    const lng = miningBounds.minLng + Math.random() * (miningBounds.maxLng - miningBounds.minLng);
-    
-    // Generate tire pressure data (6 tires per truck)
-    const tirePressures = [];
-    for (let j = 1; j <= 6; j++) {
-      tirePressures.push({
-        tireId: j,
-        position: ['front_left', 'front_right', 'middle_left', 'middle_right', 'rear_left', 'rear_right'][j-1],
-        pressure: Math.round((80 + Math.random() * 40) * 10) / 10, // 80-120 PSI
-        status: Math.random() > 0.1 ? 'normal' : (Math.random() > 0.5 ? 'low' : 'high'),
-        lastUpdated: new Date()
-      });
-    }
-
-    trucks.push({
-      id: i,
-      truckNumber: `T${String(i).padStart(4, '0')}`,
-      model: models[Math.floor(Math.random() * models.length)],
-      status: status,
-      location: {
-        type: 'Point',
-        coordinates: [lng, lat]
-      },
-      speed: status === 'active' ? Math.round(Math.random() * 60) : 0, // km/h
-      heading: Math.round(Math.random() * 360), // degrees
-      fuel: Math.round(Math.random() * 100), // percentage
-      payload: status === 'active' ? Math.round(Math.random() * 400) : 0, // tons
-      driver: status === 'active' ? `Driver ${i}` : null,
-      lastUpdate: new Date(),
-      tirePressures: tirePressures,
-      engineHours: Math.round(Math.random() * 10000),
-      odometer: Math.round(Math.random() * 100000),
-      alerts: status === 'maintenance' ? ['Engine warning', 'Scheduled maintenance'] : []
-    });
-  }
-  
-  return trucks;
-};
-
-// In-memory storage for demo (in production, use PostgreSQL)
-let trucksData = generateDummyTrucks();
-
-// Mining area GeoJSON
+// Mining area GeoJSON (static data)
 const miningArea = {
   type: "FeatureCollection",
   features: [
@@ -239,8 +191,8 @@ app.post('/api/auth/login', (req, res) => {
   }
 });
 
-// Get all trucks with filtering and pagination
-app.get('/api/trucks', authenticateToken, (req, res) => {
+// Get all trucks with filtering and pagination - FROM DATABASE
+app.get('/api/trucks', authenticateToken, async (req, res) => {
   try {
     const { 
       status, 
@@ -252,57 +204,137 @@ app.get('/api/trucks', authenticateToken, (req, res) => {
       hasAlerts
     } = req.query;
     
-    let filteredTrucks = trucksData;
+    let query = `
+      SELECT 
+        t.id,
+        t.truck_number as "truckNumber",
+        t.status,
+        t.latitude,
+        t.longitude,
+        t.speed,
+        t.heading,
+        t.fuel_percentage as fuel,
+        t.payload_tons as payload,
+        t.driver_name as driver,
+        t.engine_hours as "engineHours",
+        t.odometer,
+        t.last_maintenance as "lastMaintenance",
+        t.updated_at as "lastUpdate",
+        tm.name as model_name,
+        tm.manufacturer,
+        (SELECT COUNT(*) FROM truck_alerts ta WHERE ta.truck_id = t.id AND ta.is_resolved = false) as alert_count
+      FROM trucks t
+      LEFT JOIN truck_models tm ON t.model_id = tm.id
+      WHERE 1=1
+    `;
+    
+    const queryParams = [];
+    let paramCount = 0;
     
     // Apply filters
     if (status && status !== 'all') {
-      filteredTrucks = filteredTrucks.filter(truck => truck.status === status);
+      paramCount++;
+      query += ` AND t.status = $${paramCount}`;
+      queryParams.push(status);
     }
     
     if (search) {
-      filteredTrucks = filteredTrucks.filter(truck => 
-        truck.truckNumber.toLowerCase().includes(search.toLowerCase()) ||
-        truck.model.toLowerCase().includes(search.toLowerCase()) ||
-        (truck.driver && truck.driver.toLowerCase().includes(search.toLowerCase()))
-      );
+      paramCount++;
+      query += ` AND (t.truck_number ILIKE $${paramCount} OR tm.name ILIKE $${paramCount} OR t.driver_name ILIKE $${paramCount})`;
+      queryParams.push(`%${search}%`);
     }
     
     if (minFuel) {
-      filteredTrucks = filteredTrucks.filter(truck => truck.fuel >= parseInt(minFuel));
+      paramCount++;
+      query += ` AND t.fuel_percentage >= $${paramCount}`;
+      queryParams.push(parseInt(minFuel));
     }
     
     if (maxFuel) {
-      filteredTrucks = filteredTrucks.filter(truck => truck.fuel <= parseInt(maxFuel));
+      paramCount++;
+      query += ` AND t.fuel_percentage <= $${paramCount}`;
+      queryParams.push(parseInt(maxFuel));
     }
     
     if (hasAlerts === 'true') {
-      filteredTrucks = filteredTrucks.filter(truck => truck.alerts.length > 0);
+      query += ` AND EXISTS (SELECT 1 FROM truck_alerts ta WHERE ta.truck_id = t.id AND ta.is_resolved = false)`;
     }
     
-    // Pagination
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + parseInt(limit);
-    const paginatedTrucks = filteredTrucks.slice(startIndex, endIndex);
+    // Get total count before pagination
+    const countQuery = `SELECT COUNT(*) FROM (${query}) as filtered_trucks`;
+    const countResult = await pool.query(countQuery, queryParams);
+    const totalCount = parseInt(countResult.rows[0].count);
+    
+    // Add pagination
+    query += ` ORDER BY t.updated_at DESC`;
+    const offset = (page - 1) * limit;
+    paramCount++;
+    query += ` LIMIT $${paramCount}`;
+    queryParams.push(parseInt(limit));
+    
+    paramCount++;
+    query += ` OFFSET $${paramCount}`;
+    queryParams.push(offset);
+    
+    // Execute main query
+    const result = await pool.query(query, queryParams);
+    
+    // Transform data to match frontend format
+    const trucks = result.rows.map(row => ({
+      id: row.id,
+      truckNumber: row.truckNumber,
+      model: row.model_name,
+      manufacturer: row.manufacturer,
+      status: row.status,
+      location: {
+        type: 'Point',
+        coordinates: [parseFloat(row.longitude), parseFloat(row.latitude)]
+      },
+      speed: parseFloat(row.speed) || 0,
+      heading: row.heading || 0,
+      fuel: parseFloat(row.fuel) || 0,
+      payload: parseFloat(row.payload) || 0,
+      driver: row.driver,
+      engineHours: row.engineHours || 0,
+      odometer: row.odometer || 0,
+      lastMaintenance: row.lastMaintenance,
+      lastUpdate: row.lastUpdate,
+      alerts: [],
+      alertCount: parseInt(row.alert_count) || 0
+    }));
+    
+    // Get summary stats
+    const summaryResult = await pool.query(`
+      SELECT 
+        COUNT(*) as total,
+        COUNT(CASE WHEN status = 'active' THEN 1 END) as active,
+        COUNT(CASE WHEN status = 'inactive' THEN 1 END) as inactive,
+        COUNT(CASE WHEN status = 'maintenance' THEN 1 END) as maintenance
+      FROM trucks
+    `);
+    
+    const summary = summaryResult.rows[0];
     
     res.status(200).json({
       success: true,
       data: {
-        trucks: paginatedTrucks,
+        trucks: trucks,
         pagination: {
           current_page: parseInt(page),
           per_page: parseInt(limit),
-          total: filteredTrucks.length,
-          total_pages: Math.ceil(filteredTrucks.length / limit)
+          total: totalCount,
+          total_pages: Math.ceil(totalCount / limit)
         },
         summary: {
-          total_trucks: trucksData.length,
-          active: trucksData.filter(t => t.status === 'active').length,
-          inactive: trucksData.filter(t => t.status === 'inactive').length,
-          maintenance: trucksData.filter(t => t.status === 'maintenance').length
+          total_trucks: parseInt(summary.total),
+          active: parseInt(summary.active),
+          inactive: parseInt(summary.inactive),
+          maintenance: parseInt(summary.maintenance)
         }
       }
     });
   } catch (error) {
+    console.error('Error fetching trucks:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -311,24 +343,109 @@ app.get('/api/trucks', authenticateToken, (req, res) => {
   }
 });
 
-// Get truck by ID
-app.get('/api/trucks/:id', authenticateToken, (req, res) => {
+// Get truck by ID - FROM DATABASE
+app.get('/api/trucks/:id', authenticateToken, async (req, res) => {
   try {
     const truckId = parseInt(req.params.id);
-    const truck = trucksData.find(t => t.id === truckId);
     
-    if (!truck) {
+    const query = `
+      SELECT 
+        t.id,
+        t.truck_number as "truckNumber",
+        t.status,
+        t.latitude,
+        t.longitude,
+        t.speed,
+        t.heading,
+        t.fuel_percentage as fuel,
+        t.payload_tons as payload,
+        t.driver_name as driver,
+        t.engine_hours as "engineHours",
+        t.odometer,
+        t.last_maintenance as "lastMaintenance",
+        t.updated_at as "lastUpdate",
+        tm.name as model_name,
+        tm.manufacturer,
+        tm.capacity_tons as capacity,
+        tm.fuel_tank_capacity as fuel_tank
+      FROM trucks t
+      LEFT JOIN truck_models tm ON t.model_id = tm.id
+      WHERE t.id = $1
+    `;
+    
+    const result = await pool.query(query, [truckId]);
+    
+    if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Truck not found'
       });
     }
+    
+    const row = result.rows[0];
+    
+    // Get tire pressures
+    const tireQuery = `
+      SELECT 
+        tire_position as position,
+        tire_number as "tireNumber",
+        pressure_psi as pressure,
+        status,
+        temperature,
+        recorded_at as "lastUpdated"
+      FROM tire_pressures 
+      WHERE truck_id = $1 
+      ORDER BY tire_number
+    `;
+    
+    const tireResult = await pool.query(tireQuery, [truckId]);
+    
+    // Get alerts
+    const alertQuery = `
+      SELECT 
+        alert_type as type,
+        severity,
+        message,
+        is_resolved as "isResolved",
+        created_at as "createdAt"
+      FROM truck_alerts 
+      WHERE truck_id = $1 
+      ORDER BY created_at DESC
+    `;
+    
+    const alertResult = await pool.query(alertQuery, [truckId]);
+    
+    const truck = {
+      id: row.id,
+      truckNumber: row.truckNumber,
+      model: row.model_name,
+      manufacturer: row.manufacturer,
+      capacity: row.capacity,
+      fuelTank: row.fuel_tank,
+      status: row.status,
+      location: {
+        type: 'Point',
+        coordinates: [parseFloat(row.longitude), parseFloat(row.latitude)]
+      },
+      speed: parseFloat(row.speed) || 0,
+      heading: row.heading || 0,
+      fuel: parseFloat(row.fuel) || 0,
+      payload: parseFloat(row.payload) || 0,
+      driver: row.driver,
+      engineHours: row.engineHours || 0,
+      odometer: row.odometer || 0,
+      lastMaintenance: row.lastMaintenance,
+      lastUpdate: row.lastUpdate,
+      tirePressures: tireResult.rows,
+      alerts: alertResult.rows
+    };
     
     res.status(200).json({
       success: true,
       data: truck
     });
   } catch (error) {
+    console.error('Error fetching truck:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -337,29 +454,54 @@ app.get('/api/trucks/:id', authenticateToken, (req, res) => {
   }
 });
 
-// Get truck tire pressures
-app.get('/api/trucks/:id/tires', authenticateToken, (req, res) => {
+// Get truck tire pressures - FROM DATABASE
+app.get('/api/trucks/:id/tires', authenticateToken, async (req, res) => {
   try {
     const truckId = parseInt(req.params.id);
-    const truck = trucksData.find(t => t.id === truckId);
     
-    if (!truck) {
+    // Get truck info
+    const truckQuery = `
+      SELECT truck_number as "truckNumber"
+      FROM trucks 
+      WHERE id = $1
+    `;
+    
+    const truckResult = await pool.query(truckQuery, [truckId]);
+    
+    if (truckResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Truck not found'
       });
     }
     
+    // Get tire pressures
+    const tireQuery = `
+      SELECT 
+        tire_position as position,
+        tire_number as "tireNumber",
+        pressure_psi as pressure,
+        status,
+        temperature,
+        recorded_at as "lastUpdated"
+      FROM tire_pressures 
+      WHERE truck_id = $1 
+      ORDER BY tire_number
+    `;
+    
+    const tireResult = await pool.query(tireQuery, [truckId]);
+    
     res.status(200).json({
       success: true,
       data: {
-        truckId: truck.id,
-        truckNumber: truck.truckNumber,
-        tirePressures: truck.tirePressures,
-        lastUpdated: truck.lastUpdate
+        truckId: truckId,
+        truckNumber: truckResult.rows[0].truckNumber,
+        tirePressures: tireResult.rows,
+        lastUpdated: new Date()
       }
     });
   } catch (error) {
+    console.error('Error fetching tire pressures:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -384,34 +526,63 @@ app.get('/api/mining-area', authenticateToken, (req, res) => {
   }
 });
 
-// Real-time truck locations (GeoJSON format)
-app.get('/api/trucks/realtime/locations', authenticateToken, (req, res) => {
+// Real-time truck locations (GeoJSON format) - FROM DATABASE
+app.get('/api/trucks/realtime/locations', authenticateToken, async (req, res) => {
   try {
     const { status } = req.query;
     
-    let filteredTrucks = trucksData;
+    let query = `
+      SELECT 
+        t.id,
+        t.truck_number as "truckNumber",
+        t.status,
+        t.latitude,
+        t.longitude,
+        t.speed,
+        t.heading,
+        t.fuel_percentage as fuel,
+        t.payload_tons as payload,
+        t.driver_name as driver,
+        t.updated_at as "lastUpdate",
+        tm.name as model,
+        (SELECT COUNT(*) FROM truck_alerts ta WHERE ta.truck_id = t.id AND ta.is_resolved = false) as alert_count
+      FROM trucks t
+      LEFT JOIN truck_models tm ON t.model_id = tm.id
+      WHERE t.latitude IS NOT NULL AND t.longitude IS NOT NULL
+    `;
+    
+    const queryParams = [];
+    
     if (status && status !== 'all') {
-      filteredTrucks = filteredTrucks.filter(truck => truck.status === status);
+      query += ` AND t.status = $1`;
+      queryParams.push(status);
     }
+    
+    query += ` ORDER BY t.updated_at DESC`;
+    
+    const result = await pool.query(query, queryParams);
     
     const geoJsonData = {
       type: "FeatureCollection",
-      features: filteredTrucks.map(truck => ({
+      features: result.rows.map(row => ({
         type: "Feature",
         properties: {
-          id: truck.id,
-          truckNumber: truck.truckNumber,
-          model: truck.model,
-          status: truck.status,
-          speed: truck.speed,
-          heading: truck.heading,
-          fuel: truck.fuel,
-          payload: truck.payload,
-          driver: truck.driver,
-          lastUpdate: truck.lastUpdate,
-          alertCount: truck.alerts.length
+          id: row.id,
+          truckNumber: row.truckNumber,
+          model: row.model,
+          status: row.status,
+          speed: parseFloat(row.speed) || 0,
+          heading: row.heading || 0,
+          fuel: parseFloat(row.fuel) || 0,
+          payload: parseFloat(row.payload) || 0,
+          driver: row.driver,
+          lastUpdate: row.lastUpdate,
+          alertCount: parseInt(row.alert_count) || 0
         },
-        geometry: truck.location
+        geometry: {
+          type: "Point",
+          coordinates: [parseFloat(row.longitude), parseFloat(row.latitude)]
+        }
       }))
     };
     
@@ -420,6 +591,7 @@ app.get('/api/trucks/realtime/locations', authenticateToken, (req, res) => {
       data: geoJsonData
     });
   } catch (error) {
+    console.error('Error fetching realtime locations:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -428,27 +600,57 @@ app.get('/api/trucks/realtime/locations', authenticateToken, (req, res) => {
   }
 });
 
-// Get dashboard statistics
-app.get('/api/dashboard/stats', authenticateToken, (req, res) => {
+// Get dashboard statistics - FROM DATABASE
+app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
   try {
-    const stats = {
-      totalTrucks: trucksData.length,
-      activeTrucks: trucksData.filter(t => t.status === 'active').length,
-      inactiveTrucks: trucksData.filter(t => t.status === 'inactive').length,
-      maintenanceTrucks: trucksData.filter(t => t.status === 'maintenance').length,
-      averageFuel: Math.round(trucksData.reduce((sum, t) => sum + t.fuel, 0) / trucksData.length),
-      totalPayload: trucksData.reduce((sum, t) => sum + t.payload, 0),
-      alertsCount: trucksData.reduce((sum, t) => sum + t.alerts.length, 0),
-      lowTirePressureCount: trucksData.filter(truck => 
-        truck.tirePressures.some(tire => tire.status === 'low')
-      ).length
-    };
+    const statsQuery = `
+      SELECT 
+        COUNT(*) as total_trucks,
+        COUNT(CASE WHEN status = 'active' THEN 1 END) as active_trucks,
+        COUNT(CASE WHEN status = 'inactive' THEN 1 END) as inactive_trucks,
+        COUNT(CASE WHEN status = 'maintenance' THEN 1 END) as maintenance_trucks,
+        AVG(fuel_percentage)::DECIMAL(5,2) as avg_fuel,
+        SUM(CASE WHEN status = 'active' THEN payload_tons ELSE 0 END) as total_payload
+      FROM trucks
+    `;
+    
+    const alertQuery = `
+      SELECT COUNT(*) as active_alerts
+      FROM truck_alerts 
+      WHERE is_resolved = false
+    `;
+    
+    const tireQuery = `
+      SELECT COUNT(DISTINCT truck_id) as low_tire_trucks
+      FROM tire_pressures 
+      WHERE status = 'low'
+    `;
+    
+    const [statsResult, alertResult, tireResult] = await Promise.all([
+      pool.query(statsQuery),
+      pool.query(alertQuery),
+      pool.query(tireQuery)
+    ]);
+    
+    const stats = statsResult.rows[0];
+    const alerts = alertResult.rows[0];
+    const tires = tireResult.rows[0];
     
     res.status(200).json({
       success: true,
-      data: stats
+      data: {
+        totalTrucks: parseInt(stats.total_trucks),
+        activeTrucks: parseInt(stats.active_trucks),
+        inactiveTrucks: parseInt(stats.inactive_trucks),
+        maintenanceTrucks: parseInt(stats.maintenance_trucks),
+        averageFuel: parseFloat(stats.avg_fuel) || 0,
+        totalPayload: parseFloat(stats.total_payload) || 0,
+        alertsCount: parseInt(alerts.active_alerts),
+        lowTirePressureCount: parseInt(tires.low_tire_trucks)
+      }
     });
   } catch (error) {
+    console.error('Error fetching dashboard stats:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -457,8 +659,8 @@ app.get('/api/dashboard/stats', authenticateToken, (req, res) => {
   }
 });
 
-// Update truck status
-app.put('/api/trucks/:id/status', authenticateToken, (req, res) => {
+// Update truck status - UPDATE DATABASE
+app.put('/api/trucks/:id/status', authenticateToken, async (req, res) => {
   try {
     const truckId = parseInt(req.params.id);
     const { status } = req.body;
@@ -470,16 +672,23 @@ app.put('/api/trucks/:id/status', authenticateToken, (req, res) => {
       });
     }
     
-    const truckIndex = trucksData.findIndex(t => t.id === truckId);
-    if (truckIndex === -1) {
+    const updateQuery = `
+      UPDATE trucks 
+      SET status = $1, updated_at = CURRENT_TIMESTAMP 
+      WHERE id = $2
+      RETURNING *
+    `;
+    
+    const result = await pool.query(updateQuery, [status, truckId]);
+    
+    if (result.rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: 'Truck not found'
       });
     }
     
-    trucksData[truckIndex].status = status;
-    trucksData[truckIndex].lastUpdate = new Date();
+    const updatedTruck = result.rows[0];
     
     // Broadcast update to all connected clients
     io.emit('truckStatusUpdate', {
@@ -491,9 +700,15 @@ app.put('/api/trucks/:id/status', authenticateToken, (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Truck status updated successfully',
-      data: trucksData[truckIndex]
+      data: {
+        id: updatedTruck.id,
+        truckNumber: updatedTruck.truck_number,
+        status: updatedTruck.status,
+        lastUpdate: updatedTruck.updated_at
+      }
     });
   } catch (error) {
+    console.error('Error updating truck status:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -536,46 +751,66 @@ io.on('connection', (socket) => {
   });
 });
 
-// Simulate real-time truck movement and updates
+// Simulate real-time truck movement and updates - UPDATE DATABASE
 const simulateRealTimeUpdates = () => {
-  setInterval(() => {
-    // Update random trucks (simulate movement and data changes)
-    const trucksToUpdate = Math.floor(Math.random() * 50) + 10; // Update 10-60 trucks
-    
-    for (let i = 0; i < trucksToUpdate; i++) {
-      const randomIndex = Math.floor(Math.random() * trucksData.length);
-      const truck = trucksData[randomIndex];
+  setInterval(async () => {
+    try {
+      // Get random active trucks to update
+      const trucksQuery = `
+        SELECT id, latitude, longitude, fuel_percentage, speed, heading
+        FROM trucks 
+        WHERE status = 'active' 
+        ORDER BY RANDOM() 
+        LIMIT $1
+      `;
       
-      if (truck.status === 'active') {
+      const trucksToUpdate = Math.floor(Math.random() * 50) + 10; // Update 10-60 trucks
+      const result = await pool.query(trucksQuery, [trucksToUpdate]);
+      
+      for (const truck of result.rows) {
         // Simulate movement (small random displacement)
-        const currentLng = truck.location.coordinates[0];
-        const currentLat = truck.location.coordinates[1];
+        const currentLng = parseFloat(truck.longitude);
+        const currentLat = parseFloat(truck.latitude);
         
-        truck.location.coordinates[0] = currentLng + (Math.random() - 0.5) * 0.001;
-        truck.location.coordinates[1] = currentLat + (Math.random() - 0.5) * 0.001;
-        truck.speed = Math.round(Math.random() * 60);
-        truck.heading = (truck.heading + (Math.random() - 0.5) * 30) % 360;
-        truck.fuel = Math.max(0, truck.fuel - Math.random() * 0.5);
-        truck.lastUpdate = new Date();
+        const newLng = currentLng + (Math.random() - 0.5) * 0.001;
+        const newLat = currentLat + (Math.random() - 0.5) * 0.001;
+        const newSpeed = Math.round(Math.random() * 60);
+        const newHeading = (truck.heading + (Math.random() - 0.5) * 30) % 360;
+        const newFuel = Math.max(0, truck.fuel_percentage - Math.random() * 0.5);
+        
+        // Update truck in database
+        await pool.query(`
+          UPDATE trucks 
+          SET latitude = $1, longitude = $2, speed = $3, heading = $4, 
+              fuel_percentage = $5, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $6
+        `, [newLat, newLng, newSpeed, newHeading, newFuel, truck.id]);
         
         // Occasionally update tire pressures
         if (Math.random() < 0.1) {
-          truck.tirePressures.forEach(tire => {
-            tire.pressure += (Math.random() - 0.5) * 2;
-            tire.pressure = Math.max(60, Math.min(140, tire.pressure));
-            tire.status = tire.pressure < 80 ? 'low' : tire.pressure > 120 ? 'high' : 'normal';
-            tire.lastUpdated = new Date();
-          });
+          await pool.query(`
+            UPDATE tire_pressures 
+            SET pressure_psi = pressure_psi + ($1), 
+                status = CASE 
+                  WHEN pressure_psi + ($1) < 80 THEN 'low'
+                  WHEN pressure_psi + ($1) > 120 THEN 'high'
+                  ELSE 'normal'
+                END,
+                recorded_at = CURRENT_TIMESTAMP
+            WHERE truck_id = $2
+          `, [(Math.random() - 0.5) * 2, truck.id]);
         }
       }
+      
+      // Broadcast updates to subscribed clients
+      io.to('truckUpdates').emit('trucksLocationUpdate', {
+        timestamp: new Date(),
+        updatedCount: result.rows.length
+      });
+      
+    } catch (error) {
+      console.error('Error updating real-time data:', error);
     }
-    
-    // Broadcast updates to subscribed clients
-    io.to('truckUpdates').emit('trucksLocationUpdate', {
-      timestamp: new Date(),
-      updatedCount: trucksToUpdate
-    });
-    
   }, 5000); // Update every 5 seconds
 };
 
@@ -611,6 +846,7 @@ server.listen(PORT, HOST, () => {
   console.log(`🚛 Fleet Management Server running on http://${HOST}:${PORT}`);
   console.log(`📡 WebSocket server ready for real-time tracking`);
   console.log(`🌐 Server accessible from network at http://[YOUR_IP]:${PORT}`);
+  console.log(`💾 Using PostgreSQL database: ${process.env.DB_NAME || 'fleet_management'}`);
   
   // Show network interfaces
   const os = require('os');
