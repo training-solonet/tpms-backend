@@ -25,38 +25,38 @@ const startRealTimeSimulation = (io) => {
       const result = await pool.query(trucksQuery, [trucksToUpdate]);
       
       for (const truck of result.rows) {
-        // Ensure all values are properly parsed and within bounds
-        const currentLng = parseFloat(truck.longitude) || 107.15;
-        const currentLat = parseFloat(truck.latitude) || -6.75;
+        // Ensure all values are properly parsed and within PT INDOBARA bounds
+        const currentLng = parseFloat(truck.longitude) || 115.545;
+        const currentLat = parseFloat(truck.latitude) || -3.575;
         const currentFuel = parseFloat(truck.fuel_percentage) || 50;
         const currentSpeed = parseFloat(truck.speed) || 0;
         const currentHeading = parseInt(truck.heading) || 0;
         
-        // Simulate movement (small random displacement)
-        const newLng = Math.round((currentLng + (Math.random() - 0.5) * 0.001) * 100000) / 100000;
-        const newLat = Math.round((currentLat + (Math.random() - 0.5) * 0.001) * 100000) / 100000;
+        // Simulate movement (small random displacement within PT INDOBARA)
+        const newLng = parseFloat((currentLng + (Math.random() - 0.5) * 0.002).toFixed(8));
+        const newLat = parseFloat((currentLat + (Math.random() - 0.5) * 0.002).toFixed(8));
         
-        // Ensure bounds are within mining area
-        const boundedLng = Math.max(107.1, Math.min(107.2, newLng));
-        const boundedLat = Math.max(-6.8, Math.min(-6.7, newLat));
+        // Ensure bounds are within PT INDOBARA mining area
+        const boundedLng = Math.max(115.432199323066001, Math.min(115.658299919322602, newLng));
+        const boundedLat = Math.max(-3.717200000114277, Math.min(-3.431898966201222, newLat));
         
         // Generate new values with proper bounds and types
         const newSpeed = Math.round(Math.random() * 60); // 0-60 km/h as integer
         const newHeading = Math.round((currentHeading + (Math.random() - 0.5) * 30) % 360); // Keep within 0-359
-        const newFuel = Math.round((Math.max(0, currentFuel - Math.random() * 0.5)) * 100) / 100; // Decimal with 2 places
+        const newFuel = parseFloat((Math.max(0, currentFuel - Math.random() * 0.5)).toFixed(2)); // Decimal with 2 places
         
         // Ensure heading is positive
         const finalHeading = newHeading < 0 ? newHeading + 360 : newHeading;
         
-        // Update truck in database with proper data types
+        // Update truck in database with proper data types and explicit casting
         await pool.query(`
           UPDATE trucks 
           SET 
-            longitude = $1,
-            latitude = $2,
+            longitude = $1::DECIMAL(11,8),
+            latitude = $2::DECIMAL(10,8),
             speed = $3, 
             heading = $4, 
-            fuel_percentage = $5, 
+            fuel_percentage = $5::DECIMAL(5,2), 
             updated_at = CURRENT_TIMESTAMP
           WHERE id = $6
         `, [
@@ -70,15 +70,15 @@ const startRealTimeSimulation = (io) => {
         
         // Occasionally update tire pressures (10% chance)
         if (Math.random() < 0.1) {
-          const pressureChange = Math.round((Math.random() - 0.5) * 4 * 10) / 10; // -2.0 to +2.0 PSI
+          const pressureChange = parseFloat(((Math.random() - 0.5) * 4).toFixed(1)); // -2.0 to +2.0 PSI
           
           await pool.query(`
             UPDATE tire_pressures 
             SET 
-              pressure_psi = GREATEST(50, LEAST(150, pressure_psi + $1)),
+              pressure_psi = GREATEST(50, LEAST(150, pressure_psi + $1::DECIMAL(5,1))),
               status = CASE 
-                WHEN pressure_psi + $1 < 80 THEN 'low'
-                WHEN pressure_psi + $1 > 120 THEN 'high'
+                WHEN pressure_psi + $1::DECIMAL(5,1) < 80 THEN 'low'
+                WHEN pressure_psi + $1::DECIMAL(5,1) > 120 THEN 'high'
                 ELSE 'normal'
               END,
               recorded_at = CURRENT_TIMESTAMP
