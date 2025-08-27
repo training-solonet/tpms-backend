@@ -286,3 +286,4 @@ profile-*
 
 # Custom exclusions for this project
 # Add any specific files or directories your project generates
+/src/generated/prisma

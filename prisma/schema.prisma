@@ -1,0 +1,157 @@
+// Fleet Management Database Schema - Optimized for Prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          Int      @id @default(autoincrement())
+  username    String   @unique @db.VarChar(50)
+  email       String   @unique @db.VarChar(100)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  role        String   @default("operator") @db.VarChar(20)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model TruckModel {
+  id               Int    @id @default(autoincrement())
+  name             String @db.VarChar(50)
+  manufacturer     String @db.VarChar(50)
+  capacityTons     Int    @map("capacity_tons")
+  fuelTankCapacity Int    @map("fuel_tank_capacity")
+  tireCount        Int    @default(6) @map("tire_count")
+  createdAt        DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  trucks Truck[]
+
+  @@map("truck_models")
+}
+
+enum TruckStatus {
+  active
+  inactive
+  maintenance
+}
+
+model Truck {
+  id               Int         @id @default(autoincrement())
+  truckNumber      String      @unique @map("truck_number") @db.VarChar(20)
+  modelId          Int?        @map("model_id")
+  status           TruckStatus @default(active)
+  latitude         Decimal?    @db.Decimal(10, 8)
+  longitude        Decimal?    @db.Decimal(11, 8)
+  speed            Decimal     @default(0) @db.Decimal(5, 2)
+  heading          Int         @default(0)
+  fuelPercentage   Decimal     @default(100) @map("fuel_percentage") @db.Decimal(5, 2)
+  payloadTons      Decimal     @default(0) @map("payload_tons") @db.Decimal(6, 2)
+  driverName       String?     @map("driver_name") @db.VarChar(100)
+  engineHours      Int         @default(0) @map("engine_hours")
+  odometer         Int         @default(0)
+  lastMaintenance  DateTime?   @map("last_maintenance") @db.Date
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @default(now()) @updatedAt @map("updated_at")
+
+  // Relations
+  model          TruckModel?     @relation(fields: [modelId], references: [id])
+  tirePressures  TirePressure[]
+  alerts         TruckAlert[]
+  locationHistory LocationHistory[]
+
+  @@map("trucks")
+}
+
+enum TirePressureStatus {
+  normal
+  low
+  high
+}
+
+model TirePressure {
+  id           Int                 @id @default(autoincrement())
+  truckId      Int                 @map("truck_id")
+  tirePosition String              @map("tire_position") @db.VarChar(20)
+  tireNumber   Int                 @map("tire_number")
+  pressurePsi  Decimal             @map("pressure_psi") @db.Decimal(5, 1)
+  status       TirePressureStatus  @default(normal)
+  temperature  Decimal?            @db.Decimal(5, 2)
+  recordedAt   DateTime            @default(now()) @map("recorded_at")
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id], onDelete: Cascade)
+
+  @@unique([truckId, tireNumber])
+  @@map("tire_pressures")
+}
+
+model LocationHistory {
+  id             Int      @id @default(autoincrement())
+  truckId        Int      @map("truck_id")
+  latitude       Decimal  @db.Decimal(10, 8)
+  longitude      Decimal  @db.Decimal(11, 8)
+  speed          Decimal  @default(0) @db.Decimal(5, 2)
+  heading        Int      @default(0)
+  fuelPercentage Decimal? @map("fuel_percentage") @db.Decimal(5, 2)
+  recordedAt     DateTime @default(now()) @map("recorded_at")
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id], onDelete: Cascade)
+
+  @@index([truckId, recordedAt(sort: Desc)], name: "idx_location_history_truck_time")
+  @@map("location_history")
+}
+
+enum AlertSeverity {
+  low
+  medium
+  high
+  critical
+}
+
+model TruckAlert {
+  id         Int           @id @default(autoincrement())
+  truckId    Int           @map("truck_id")
+  alertType  String        @map("alert_type") @db.VarChar(50)
+  severity   AlertSeverity @default(medium)
+  message    String
+  isResolved Boolean       @default(false) @map("is_resolved")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  resolvedAt DateTime?     @map("resolved_at")
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id], onDelete: Cascade)
+
+  @@index([truckId, isResolved], name: "idx_truck_alerts_truck_resolved")
+  @@map("truck_alerts")
+}
+
+model MiningZone {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(100)
+  zoneType  String   @map("zone_type") @db.VarChar(50)
+  boundary  String   // WKT format polygon as string
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("mining_zones")
+}
+
+// Ignore PostGIS system table
+model SpatialRefSys {
+  srid      Int     @id
+  authName  String? @map("auth_name") @db.VarChar(256)
+  authSrid  Int?    @map("auth_srid")
+  srtext    String? @db.VarChar(2048)
+  proj4text String? @db.VarChar(2048)
+
+  @@map("spatial_ref_sys")
+  @@ignore
+}
