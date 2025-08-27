@@ -1,78 +1,78 @@
-const socketIo = require('socket.io');
-const jwt = require('jsonwebtoken');
-const { JWT_SECRET } = require('../config/jwt');
+let io = null;
 
-let io;
-
-const initializeWebSocket = (server) => {
-  io = socketIo(server, {
-    cors: {
-      origin: "*",
-      methods: ["GET", "POST"],
-      credentials: true
-    }
-  });
-
-  // WebSocket authentication middleware
-  io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
-    if (!token) {
-      return next(new Error('Authentication error'));
-    }
-    
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-      if (err) {
-        return next(new Error('Authentication error'));
-      }
-      socket.user = user;
-      next();
-    });
-  });
-
-  // Handle connections
-  io.on('connection', (socket) => {
-    console.log(`User ${socket.user.username} connected from ${socket.handshake.address}`);
-    
-    socket.on('subscribeToTruckUpdates', () => {
-      socket.join('truckUpdates');
-      console.log(`User ${socket.user.username} subscribed to truck updates`);
-    });
-    
-    socket.on('unsubscribeFromTruckUpdates', () => {
-      socket.leave('truckUpdates');
-      console.log(`User ${socket.user.username} unsubscribed from truck updates`);
-    });
-    
-    socket.on('disconnect', () => {
-      console.log(`User ${socket.user.username} disconnected`);
-    });
-  });
-
-  return io;
+const initialize = (socketIo) => {
+  io = socketIo;
+  console.log('📡 WebSocket service initialized');
 };
 
-const getIO = () => {
+const broadcastTruckLocationUpdate = (data) => {
   if (!io) {
-    throw new Error('WebSocket not initialized');
+    console.warn('WebSocket not initialized');
+    return;
   }
-  return io;
-};
 
-const broadcastTruckUpdate = (data) => {
-  if (io) {
-    io.to('truckUpdates').emit('trucksLocationUpdate', data);
-  }
+  io.to('truck-updates').emit('trucksLocationUpdate', {
+    type: 'location_update',
+    data: data,
+    timestamp: new Date().toISOString()
+  });
 };
 
 const broadcastTruckStatusUpdate = (data) => {
-  if (io) {
-    io.emit('truckStatusUpdate', data);
+  if (!io) {
+    console.warn('WebSocket not initialized');
+    return;
   }
+
+  io.to('truck-updates').emit('truckStatusUpdate', {
+    type: 'status_update',
+    data: data,
+    timestamp: new Date().toISOString()
+  });
+};
+
+const broadcastNewAlert = (alert) => {
+  if (!io) {
+    console.warn('WebSocket not initialized');
+    return;
+  }
+
+  io.to('alerts').emit('newAlert', {
+    type: 'new_alert',
+    data: alert,
+    timestamp: new Date().toISOString()
+  });
+};
+
+const broadcastAlertResolved = (alert) => {
+  if (!io) {
+    console.warn('WebSocket not initialized');
+    return;
+  }
+
+  io.to('alerts').emit('alertResolved', {
+    type: 'alert_resolved',
+    data: alert,
+    timestamp: new Date().toISOString()
+  });
+};
+
+const getConnectedClients = () => {
+  if (!io) return 0;
+  return io.engine.clientsCount;
+};
+
+const getRooms = () => {
+  if (!io) return [];
+  return Object.keys(io.sockets.adapter.rooms);
 };
 
 module.exports = {
-  initializeWebSocket,
-  getIO,
-  broadcastTruckUpdate,
-  broadcastTruckStatusUpdate
+  initialize,
+  broadcastTruckLocationUpdate,
+  broadcastTruckStatusUpdate,
+  broadcastNewAlert,
+  broadcastAlertResolved,
+  getConnectedClients,
+  getRooms
 };
