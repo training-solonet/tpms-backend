@@ -82,9 +82,10 @@ class HistorySeeder {
   async getTrucks() {
     try {
       const where = {};
-      const trucks = await prisma.truck.findMany({
+      
+      // Build the query options object
+      const queryOptions = {
         where,
-        take: this.options.truckLimit,
         orderBy: { truckNumber: 'asc' },
         include: {
           model: {
@@ -95,7 +96,14 @@ class HistorySeeder {
             }
           }
         }
-      });
+      };
+
+      // Only add 'take' if truckLimit is a valid positive number
+      if (this.options.truckLimit && this.options.truckLimit > 0) {
+        queryOptions.take = this.options.truckLimit;
+      }
+
+      const trucks = await prisma.truck.findMany(queryOptions);
 
       this.log(`Found ${trucks.length} trucks to process`);
       return trucks;
@@ -107,15 +115,15 @@ class HistorySeeder {
 
   generateRealisticMovement(truck, startTime, endTime) {
     const movements = [];
-    const isActive = truck.status === 'ACTIVE';
+    const isActive = truck.status === 'ACTIVE' || truck.status === 'active'; // Handle both enum and string values
     const route = MINING_CONFIG.routes[Math.floor(Math.random() * MINING_CONFIG.routes.length)];
     
     let currentTime = moment(startTime);
     let currentPosition = {
-      lat: truck.latitude || this.getRandomPositionInBounds().lat,
-      lng: truck.longitude || this.getRandomPositionInBounds().lng
+      lat: parseFloat(truck.latitude) || this.getRandomPositionInBounds().lat,
+      lng: parseFloat(truck.longitude) || this.getRandomPositionInBounds().lng
     };
-    let currentFuel = truck.fuelPercentage || (60 + Math.random() * 40);
+    let currentFuel = parseFloat(truck.fuelPercentage) || (60 + Math.random() * 40);
     let waypointIndex = 0;
     let heading = truck.heading || Math.floor(Math.random() * 360);
 
@@ -249,7 +257,12 @@ class HistorySeeder {
     try {
       // 1. Breakdown incidents
       const breakdownTrucks = await prisma.truck.findMany({
-        where: { status: 'ACTIVE' },
+        where: { 
+          OR: [
+            { status: 'ACTIVE' },
+            { status: 'active' }
+          ]
+        },
         take: 3
       });
 
@@ -276,7 +289,12 @@ class HistorySeeder {
 
       // 2. High-activity periods (loading/unloading)
       const activeTrucks = await prisma.truck.findMany({
-        where: { status: 'ACTIVE' },
+        where: { 
+          OR: [
+            { status: 'ACTIVE' },
+            { status: 'active' }
+          ]
+        },
         take: 5
       });
 
@@ -431,7 +449,9 @@ async function main() {
         options.batchSize = parseInt(value) || 200;
         break;
       case 'limit':
-        options.truckLimit = parseInt(value) || null;
+        // Ensure limit is a positive integer or null
+        const limitValue = parseInt(value);
+        options.truckLimit = (limitValue && limitValue > 0) ? limitValue : null;
         break;
       case 'delete':
         options.deleteExisting = value === 'true' || value === '1';
