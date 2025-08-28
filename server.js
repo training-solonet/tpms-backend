@@ -706,7 +706,7 @@ const startServer = async () => {
   try {
     const server = await wsServer.initialize();
 
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
       const bootTime = Date.now() - startTime;
       
       console.log('🚀 ================================');
@@ -714,14 +714,15 @@ const startServer = async () => {
       console.log('🚀 ================================');
       console.log(`📡 WebSocket server running on port ${PORT}`);
       console.log(`🌍 Environment: ${NODE_ENV}`);
-      console.log(`🔗 WebSocket URL: ws://localhost:${PORT}/ws`);
+      console.log(`🔗 WebSocket URL: ws://0.0.0.0:${PORT}/ws`);
+      console.log(`🌐 Network Access: Server accessible from other networks`);
       console.log('🚀 ================================');
 
       // Log server startup
       logServerStartup({
         port: PORT,
         environment: NODE_ENV,
-        websocketUrl: `ws://localhost:${PORT}/ws`,
+        websocketUrl: `ws://0.0.0.0:${PORT}/ws`,
         databaseStatus: wsServer.isReady ? 'connected' : 'disconnected',
         startupTime: bootTime,
         adminId: 'system',
