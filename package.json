@@ -78,7 +78,7 @@
     "moment": "^2.29.4",
     "pg": "^8.11.3",
     "rate-limiter-flexible": "^2.4.2",
-    "socket.io": "^4.7.4",
+    "ws": "^8.14.2",
     "winston": "^3.11.0"
   },
   "devDependencies": {
@@ -87,7 +87,6 @@
     "nodemon": "^3.0.2",
     "prettier": "^3.1.0",
     "prisma": "^5.18.0",
-    "socket.io-client": "^4.7.4",
     "supertest": "^6.3.3"
   },
   "prisma": {

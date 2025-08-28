@@ -1,43 +1,51 @@
-let io = null;
+const WebSocket = require('ws');
 
-const initialize = (socketIo) => {
-  io = socketIo;
+let wsServer = null;
+let clients = new Map();
+let subscriptions = {
+  truckUpdates: new Set(),
+  alerts: new Set(),
+  dashboard: new Set()
+};
+
+const initialize = (webSocketServer) => {
+  wsServer = webSocketServer;
   console.log('📡 WebSocket service initialized');
 };
 
 const broadcastTruckLocationUpdate = (data) => {
-  if (!io) {
-    console.warn('WebSocket not initialized');
+  if (!wsServer) {
+    console.warn('WebSocket server not initialized');
     return;
   }
 
-  io.to('truck-updates').emit('trucksLocationUpdate', {
-    type: 'location_update',
+  broadcastToSubscription(subscriptions.truckUpdates, {
+    type: 'truck_locations_update',
     data: data,
     timestamp: new Date().toISOString()
   });
 };
 
 const broadcastTruckStatusUpdate = (data) => {
-  if (!io) {
-    console.warn('WebSocket not initialized');
+  if (!wsServer) {
+    console.warn('WebSocket server not initialized');
     return;
   }
 
-  io.to('truck-updates').emit('truckStatusUpdate', {
-    type: 'status_update',
+  broadcastToSubscription(subscriptions.truckUpdates, {
+    type: 'truck_status_update',
     data: data,
     timestamp: new Date().toISOString()
   });
 };
 
 const broadcastNewAlert = (alert) => {
-  if (!io) {
-    console.warn('WebSocket not initialized');
+  if (!wsServer) {
+    console.warn('WebSocket server not initialized');
     return;
   }
 
-  io.to('alerts').emit('newAlert', {
+  broadcastToSubscription(subscriptions.alerts, {
     type: 'new_alert',
     data: alert,
     timestamp: new Date().toISOString()
@@ -45,26 +53,91 @@ const broadcastNewAlert = (alert) => {
 };
 
 const broadcastAlertResolved = (alert) => {
-  if (!io) {
-    console.warn('WebSocket not initialized');
+  if (!wsServer) {
+    console.warn('WebSocket server not initialized');
     return;
   }
 
-  io.to('alerts').emit('alertResolved', {
+  broadcastToSubscription(subscriptions.alerts, {
     type: 'alert_resolved',
     data: alert,
     timestamp: new Date().toISOString()
   });
 };
 
-const getConnectedClients = () => {
-  if (!io) return 0;
-  return io.engine.clientsCount;
+const broadcastToSubscription = (subscription, message) => {
+  for (const clientId of subscription) {
+    const client = clients.get(clientId);
+    if (client && client.ws.readyState === WebSocket.OPEN) {
+      sendMessage(client.ws, message);
+    } else {
+      // Clean up dead connections
+      subscription.delete(clientId);
+      clients.delete(clientId);
+    }
+  }
 };
 
-const getRooms = () => {
-  if (!io) return [];
-  return Object.keys(io.sockets.adapter.rooms);
+const sendMessage = (ws, message) => {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(message));
+  }
+};
+
+const getConnectedClients = () => {
+  if (!wsServer) return 0;
+  return clients.size;
+};
+
+const getSubscriptions = () => {
+  return {
+    truckUpdates: subscriptions.truckUpdates.size,
+    alerts: subscriptions.alerts.size,
+    dashboard: subscriptions.dashboard.size
+  };
+};
+
+// Helper functions for managing clients and subscriptions
+const addClient = (clientId, clientInfo) => {
+  clients.set(clientId, clientInfo);
+};
+
+const removeClient = (clientId) => {
+  // Remove from all subscriptions
+  subscriptions.truckUpdates.delete(clientId);
+  subscriptions.alerts.delete(clientId);
+  subscriptions.dashboard.delete(clientId);
+  
+  // Remove client
+  clients.delete(clientId);
+};
+
+const addSubscription = (clientId, channel) => {
+  switch (channel) {
+    case 'truck_updates':
+      subscriptions.truckUpdates.add(clientId);
+      break;
+    case 'alerts':
+      subscriptions.alerts.add(clientId);
+      break;
+    case 'dashboard':
+      subscriptions.dashboard.add(clientId);
+      break;
+  }
+};
+
+const removeSubscription = (clientId, channel) => {
+  switch (channel) {
+    case 'truck_updates':
+      subscriptions.truckUpdates.delete(clientId);
+      break;
+    case 'alerts':
+      subscriptions.alerts.delete(clientId);
+      break;
+    case 'dashboard':
+      subscriptions.dashboard.delete(clientId);
+      break;
+  }
 };
 
 module.exports = {
@@ -74,5 +147,10 @@ module.exports = {
   broadcastNewAlert,
   broadcastAlertResolved,
   getConnectedClients,
-  getRooms
+  getSubscriptions,
+  addClient,
+  removeClient,
+  addSubscription,
+  removeSubscription,
+  sendMessage
 };

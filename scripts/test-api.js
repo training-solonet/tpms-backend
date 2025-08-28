@@ -1,5 +1,5 @@
 const axios = require('axios');
-const io = require('socket.io-client');
+const WebSocket = require('ws');
 
 // Configuration
 const BASE_URL = 'http://localhost:3001';
@@ -410,50 +410,61 @@ const testUnauthorizedAccess = async () => {
 
 const testWebSocketConnection = async () => {
   return new Promise((resolve) => {
-    const socket = io(BASE_URL, {
-      auth: { token: authToken }
-    });
+    const wsUrl = 'ws://localhost:3001/ws';
+    const socket = new WebSocket(wsUrl);
     
     const timeout = setTimeout(() => {
-      socket.disconnect();
+      socket.close();
       resolve({ success: false, error: 'WebSocket connection timeout' });
     }, 5000);
     
-    socket.on('connect', () => {
+    socket.on('open', () => {
       clearTimeout(timeout);
       
-      // Test subscription
-      socket.emit('subscribeToTruckUpdates');
+      // Send subscription message
+      socket.send(JSON.stringify({
+        type: 'subscribe',
+        data: { channel: 'truck_updates' },
+        requestId: 'test-subscription'
+      }));
       
       // Test if we can receive updates
       const updateTimeout = setTimeout(() => {
-        socket.disconnect();
+        socket.close();
         resolve({ 
           success: true, 
           data: {
             connected: true,
             subscribed: true,
-            socketId: socket.id
+            connectionTest: 'passed'
           }
         });
       }, 2000);
       
-      socket.on('trucksLocationUpdate', (data) => {
-        clearTimeout(updateTimeout);
-        socket.disconnect();
-        resolve({ 
-          success: true, 
-          data: {
-            connected: true,
-            subscribed: true,
-            receivedUpdate: true,
-            updateData: data
+      socket.on('message', (data) => {
+        try {
+          const message = JSON.parse(data.toString());
+          
+          if (message.type === 'subscription_ack' || message.type === 'truck_locations_update') {
+            clearTimeout(updateTimeout);
+            socket.close();
+            resolve({ 
+              success: true, 
+              data: {
+                connected: true,
+                subscribed: true,
+                receivedMessage: true,
+                messageType: message.type
+              }
+            });
           }
-        });
+        } catch (error) {
+          // Ignore parsing errors for this test
+        }
       });
     });
     
-    socket.on('connect_error', (error) => {
+    socket.on('error', (error) => {
       clearTimeout(timeout);
       resolve({ success: false, error: `WebSocket connection failed: ${error.message}` });
     });

@@ -1,375 +1,752 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const compression = require('compression');
+const WebSocket = require('ws');
 const http = require('http');
-const socketIo = require('socket.io');
+const url = require('url');
+const crypto = require('crypto');
 require('dotenv').config();
 
 // Import services
 const prismaService = require('./src/services/prismaService');
-const websocketService = require('./src/services/websocketService');
-
-// Import middlewares
-const authMiddleware = require('./src/middleware/auth');
-const errorHandler = require('./src/middleware/errorHandler');
-const rateLimiter = require('./src/middleware/rateLimiter');
-
-// Import routes
-const authRoutes = require('./src/routes/auth');
-const truckRoutes = require('./src/routes/trucks');
-const dashboardRoutes = require('./src/routes/dashboard');
-const miningAreaRoutes = require('./src/routes/miningArea');
-
-// Initialize Express app
-const app = express();
-const server = http.createServer(app);
-
-// Initialize Socket.IO
-const io = socketIo(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || "*",
-    methods: ["GET", "POST"],
-    credentials: true
-  }
-});
-
-// Store io instance for use in other modules
-app.set('socketio', io);
+const {
+  logServerStartup,
+  logServerShutdown,
+  logDatabaseConnection,
+  logWebSocketConnection,
+  logWebSocketDisconnection,
+  logAdminOperation,
+  logSystemHealth,
+  logError,
+  logSecurityEvent,
+  logPerformanceMetric
+} = require('./src/utils/adminLogger');
 
 const PORT = process.env.PORT || 3001;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // ==========================================
-// MIDDLEWARE SETUP
+// WEBSOCKET MESSAGE HANDLERS
 // ==========================================
 
-// Security middleware
-app.use(helmet({
-  crossOriginEmbedderPolicy: false,
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      connectSrc: ["'self'", "ws:", "wss:"],
-    },
-  },
-}));
-
-// CORS configuration
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (mobile apps, Postman, etc.)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:8080',
-      process.env.FRONTEND_URL
-    ].filter(Boolean);
-    
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn(`CORS: Origin ${origin} not allowed`);
-      callback(null, true); // Allow all origins in development
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Compression middleware
-app.use(compression());
-
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Rate limiting (only in production)
-if (NODE_ENV === 'production') {
-  app.use('/api/', rateLimiter);
-}
-
-// Request logging middleware (development only)
-if (NODE_ENV === 'development') {
-  app.use((req, res, next) => {
-    const timestamp = new Date().toISOString();
-    console.log(`${timestamp} - ${req.method} ${req.path}`);
-    next();
-  });
-}
-
-// ==========================================
-// DATABASE INITIALIZATION
-// ==========================================
-
-let isReady = false;
-
-const initializeDatabase = async () => {
-  try {
-    console.log('🔄 Initializing Prisma database connection...');
-    
-    // Connect to database
-    await prismaService.connect();
-    
-    // Perform health check
-    const health = await prismaService.healthCheck();
-    if (health.status === 'healthy') {
-      console.log('✅ Database connection healthy');
-      isReady = true;
-    } else {
-      throw new Error(`Database health check failed: ${health.error}`);
-    }
-    
-    // Get connection info
-    const connectionInfo = await prismaService.getConnectionInfo();
-    console.log(`📊 Database: ${connectionInfo.database_name}`);
-    console.log(`🔌 Active connections: ${connectionInfo.active_connections}`);
-    
-    // Optimize database
-    await prismaService.optimizeDatabase();
-    console.log('⚡ Database optimization completed');
-    
-  } catch (error) {
-    console.error('❌ Database initialization failed:', error);
-    isReady = false;
-    
-    if (NODE_ENV === 'production') {
-      process.exit(1);
-    }
+class WebSocketServer {
+  constructor() {
+    this.clients = new Map();
+    this.subscriptions = {
+      truckUpdates: new Set(),
+      alerts: new Set(),
+      dashboard: new Set()
+    };
+    this.isReady = false;
+    this.server = null;
+    this.wss = null;
   }
-};
 
-// ==========================================
-// WEBSOCKET SETUP
-// ==========================================
+  // Generate unique client ID
+  generateClientId() {
+    return crypto.randomUUID();
+  }
 
-websocketService.initialize(io);
-
-io.on('connection', (socket) => {
-  console.log(`📱 Client connected: ${socket.id}`);
-  
-  socket.on('subscribeToTruckUpdates', () => {
-    socket.join('truck-updates');
-    console.log(`🚛 Client ${socket.id} subscribed to truck updates`);
-  });
-  
-  socket.on('subscribeToAlerts', () => {
-    socket.join('alerts');
-    console.log(`🚨 Client ${socket.id} subscribed to alerts`);
-  });
-  
-  socket.on('disconnect', () => {
-    console.log(`📱 Client disconnected: ${socket.id}`);
-  });
-});
-
-// Start real-time data broadcast
-const startRealtimeBroadcast = () => {
-  setInterval(async () => {
-    if (!isReady) return;
-    
+  // Initialize WebSocket server
+  async initialize() {
     try {
-      // Broadcast truck location updates
-      const locations = await prismaService.getRealtimeLocations();
-      io.to('truck-updates').emit('trucksLocationUpdate', {
-        type: 'location_update',
-        data: locations,
-        timestamp: new Date().toISOString()
-      });
-      
-      // Check for new alerts
-      const recentAlerts = await prismaService.prisma.truckAlert.findMany({
-        where: {
-          isResolved: false,
-          createdAt: {
-            gte: new Date(Date.now() - 60000) // Last minute
+      // Initialize database first
+      await this.initializeDatabase();
+
+      // Create HTTP server for WebSocket upgrade
+      this.server = http.createServer();
+
+      // Create WebSocket server
+      this.wss = new WebSocket.Server({
+        server: this.server,
+        path: '/ws',
+        perMessageDeflate: {
+          zlibDeflateOptions: {
+            level: 3
           }
-        },
-        include: {
-          truck: {
-            select: {
-              truckNumber: true
-            }
-          }
-        },
-        orderBy: {
-          createdAt: 'desc'
         }
       });
+
+      this.setupWebSocketHandlers();
+      this.startRealtimeBroadcast();
+
+      return this.server;
+    } catch (error) {
+      console.error('❌ WebSocket server initialization failed:', error);
+      throw error;
+    }
+  }
+
+  // Database initialization
+  async initializeDatabase() {
+    try {
+      console.log('🔄 Initializing Prisma database connection...');
+      logDatabaseConnection('CONNECTING', { action: 'database_init_start' });
       
-      if (recentAlerts.length > 0) {
-        io.to('alerts').emit('newAlerts', {
-          type: 'new_alerts',
-          data: recentAlerts.map(alert => ({
-            id: alert.id,
-            type: alert.alertType,
-            severity: alert.severity,
-            message: alert.message,
-            truckNumber: alert.truck.truckNumber,
-            createdAt: alert.createdAt
-          })),
-          timestamp: new Date().toISOString()
+      await prismaService.connect();
+      
+      const health = await prismaService.healthCheck();
+      if (health.status === 'healthy') {
+        console.log('✅ Database connection healthy');
+        logDatabaseConnection('CONNECTED', { 
+          status: 'healthy',
+          database_health: health 
         });
+        this.isReady = true;
+      } else {
+        throw new Error(`Database health check failed: ${health.error}`);
       }
       
+      const connectionInfo = await prismaService.getConnectionInfo();
+      console.log(`📊 Database: ${connectionInfo.database_name}`);
+      console.log(`🔌 Active connections: ${connectionInfo.active_connections}`);
+      
+      logDatabaseConnection('OPTIMIZING', {
+        database_name: connectionInfo.database_name,
+        active_connections: connectionInfo.active_connections
+      });
+      
+      await prismaService.optimizeDatabase();
+      console.log('⚡ Database optimization completed');
+      logDatabaseConnection('OPTIMIZED', { action: 'database_optimization_completed' });
+      
     } catch (error) {
-      console.error('Real-time broadcast error:', error);
+      console.error('❌ Database initialization failed:', error);
+      logError(error, { 
+        context: 'database_initialization',
+        environment: NODE_ENV 
+      });
+      this.isReady = false;
+      
+      if (NODE_ENV === 'production') {
+        process.exit(1);
+      }
     }
-  }, 30000); // Every 30 seconds
-};
+  }
 
-// ==========================================
-// API ROUTES
-// ==========================================
+  // Setup WebSocket event handlers
+  setupWebSocketHandlers() {
+    this.wss.on('connection', (ws, request) => {
+      const clientId = this.generateClientId();
+      const clientInfo = {
+        id: clientId,
+        ws: ws,
+        subscriptions: new Set(),
+        connectedAt: new Date(),
+        lastPing: new Date(),
+        ip: request.headers['x-forwarded-for'] || request.connection.remoteAddress
+      };
 
-// Health check endpoint
-app.get('/health', async (req, res) => {
-  const health = await prismaService.healthCheck();
-  
-  res.status(health.status === 'healthy' ? 200 : 503).json({
-    status: health.status,
-    timestamp: health.timestamp,
-    database: health.status,
-    server: 'healthy',
-    version: process.env.npm_package_version || '1.0.0',
-    uptime: process.uptime()
-  });
-});
+      this.clients.set(clientId, clientInfo);
+      console.log(`📱 Client connected: ${clientId} from ${clientInfo.ip}`);
+      
+      // Log WebSocket connection
+      logWebSocketConnection({
+        clientId: clientId,
+        ip: clientInfo.ip,
+        userAgent: request.headers['user-agent']
+      });
 
-// API status endpoint
-app.get('/api/status', async (req, res) => {
-  try {
-    const [connectionInfo, truckCount] = await Promise.all([
-      prismaService.getConnectionInfo(),
-      prismaService.prisma.truck.count()
-    ]);
-    
-    res.json({
-      success: true,
-      data: {
-        database: {
-          name: connectionInfo.database_name,
-          version: connectionInfo.db_version,
-          connections: connectionInfo.active_connections
-        },
-        fleet: {
-          totalTrucks: truckCount
-        },
-        server: {
-          environment: NODE_ENV,
-          uptime: process.uptime(),
-          memory: process.memoryUsage(),
-          version: process.env.npm_package_version || '1.0.0'
-        },
-        realtime: {
-          connectedClients: io.engine.clientsCount,
-          rooms: Object.keys(io.sockets.adapter.rooms)
+      // Send connection acknowledgment
+      this.sendMessage(ws, {
+        type: 'connection_ack',
+        data: {
+          clientId: clientId,
+          serverTime: new Date().toISOString(),
+          availableSubscriptions: ['truck_updates', 'alerts', 'dashboard']
         }
-      },
-      timestamp: new Date().toISOString()
+      });
+
+      // Handle incoming messages
+      ws.on('message', (data) => {
+        try {
+          const message = JSON.parse(data.toString());
+          this.handleMessage(clientId, message);
+        } catch (error) {
+          console.error(`❌ Invalid message from client ${clientId}:`, error);
+          this.sendError(ws, 'INVALID_MESSAGE', 'Invalid JSON format');
+        }
+      });
+
+      // Handle client disconnect
+      ws.on('close', (code, reason) => {
+        console.log(`📱 Client disconnected: ${clientId} (${code}: ${reason})`);
+        
+        // Log WebSocket disconnection
+        const connectionDuration = Date.now() - clientInfo.connectedAt.getTime();
+        logWebSocketDisconnection({
+          clientId: clientId,
+          connectionDuration: Math.round(connectionDuration / 1000), // in seconds
+          reason: reason?.toString() || `Code: ${code}`
+        });
+        
+        this.handleDisconnect(clientId);
+      });
+
+      // Handle ping/pong for connection health
+      ws.on('pong', () => {
+        if (this.clients.has(clientId)) {
+          this.clients.get(clientId).lastPing = new Date();
+        }
+      });
+
+      // Handle connection errors
+      ws.on('error', (error) => {
+        console.error(`❌ WebSocket error for client ${clientId}:`, error);
+        this.handleDisconnect(clientId);
+      });
     });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Failed to get system status',
-      error: error.message
+
+    // Handle server errors
+    this.wss.on('error', (error) => {
+      console.error('❌ WebSocket server error:', error);
+    });
+
+    console.log('📡 WebSocket handlers configured');
+  }
+
+  // Handle incoming WebSocket messages
+  async handleMessage(clientId, message) {
+    const client = this.clients.get(clientId);
+    if (!client) return;
+
+    const { type, data, requestId } = message;
+
+    try {
+      switch (type) {
+        case 'ping':
+          this.sendMessage(client.ws, {
+            type: 'pong',
+            requestId,
+            timestamp: new Date().toISOString()
+          });
+          break;
+
+        case 'subscribe':
+          await this.handleSubscription(clientId, data.channel);
+          this.sendMessage(client.ws, {
+            type: 'subscription_ack',
+            requestId,
+            data: { channel: data.channel, status: 'subscribed' }
+          });
+          break;
+
+        case 'unsubscribe':
+          this.handleUnsubscription(clientId, data.channel);
+          this.sendMessage(client.ws, {
+            type: 'subscription_ack',
+            requestId,
+            data: { channel: data.channel, status: 'unsubscribed' }
+          });
+          break;
+
+        case 'get_trucks':
+          const trucks = await this.getTrucks(data?.filters);
+          this.sendMessage(client.ws, {
+            type: 'trucks_data',
+            requestId,
+            data: trucks
+          });
+          break;
+
+        case 'get_dashboard':
+          const dashboardData = await this.getDashboardData();
+          this.sendMessage(client.ws, {
+            type: 'dashboard_data',
+            requestId,
+            data: dashboardData
+          });
+          break;
+
+        case 'get_truck_details':
+          const truckDetails = await this.getTruckDetails(data.truckId);
+          this.sendMessage(client.ws, {
+            type: 'truck_details',
+            requestId,
+            data: truckDetails
+          });
+          break;
+
+        case 'update_truck_status':
+          const updateResult = await this.updateTruckStatus(data.truckId, data.status);
+          // Log admin operation
+          logAdminOperation('UPDATE_TRUCK_STATUS', clientId, {
+            truckId: data.truckId,
+            newStatus: data.status,
+            clientIp: client.ip || 'unknown'
+          });
+          this.sendMessage(client.ws, {
+            type: 'truck_status_updated',
+            requestId,
+            data: updateResult
+          });
+          break;
+
+        case 'resolve_alert':
+          const alertResult = await this.resolveAlert(data.alertId);
+          
+          // Log admin operation
+          logAdminOperation('RESOLVE_ALERT', clientId, {
+            alertId: data.alertId,
+            clientIp: client.ip || 'unknown'
+          });
+          
+          this.sendMessage(client.ws, {
+            type: 'alert_resolved',
+            requestId,
+            data: alertResult
+          });
+          break;
+
+        case 'health_check':
+          const health = await this.getSystemHealth();
+          
+          // Log system health check
+          logSystemHealth(health);
+          
+          this.sendMessage(client.ws, {
+            type: 'health_status',
+            requestId,
+            data: health
+          });
+          break;
+
+        default:
+          this.sendError(client.ws, 'UNKNOWN_MESSAGE_TYPE', `Unknown message type: ${type}`, requestId);
+      }
+    } catch (error) {
+      console.error(`❌ Error handling message ${type} from client ${clientId}:`, error);
+      this.sendError(client.ws, 'INTERNAL_ERROR', error.message, requestId);
+    }
+  }
+
+  // Handle subscriptions
+  async handleSubscription(clientId, channel) {
+    const client = this.clients.get(clientId);
+    if (!client) return;
+
+    client.subscriptions.add(channel);
+
+    switch (channel) {
+      case 'truck_updates':
+        this.subscriptions.truckUpdates.add(clientId);
+        // Send initial data
+        const locations = await prismaService.getRealtimeLocations();
+        this.sendMessage(client.ws, {
+          type: 'truck_locations',
+          data: locations,
+          timestamp: new Date().toISOString()
+        });
+        break;
+
+      case 'alerts':
+        this.subscriptions.alerts.add(clientId);
+        // Send current unresolved alerts
+        const alerts = await this.getUnresolvedAlerts();
+        this.sendMessage(client.ws, {
+          type: 'current_alerts',
+          data: alerts,
+          timestamp: new Date().toISOString()
+        });
+        break;
+
+      case 'dashboard':
+        this.subscriptions.dashboard.add(clientId);
+        // Send dashboard data
+        const dashboardData = await this.getDashboardData();
+        this.sendMessage(client.ws, {
+          type: 'dashboard_data',
+          data: dashboardData,
+          timestamp: new Date().toISOString()
+        });
+        break;
+    }
+
+    console.log(`🔔 Client ${clientId} subscribed to ${channel}`);
+  }
+
+  // Handle unsubscriptions
+  handleUnsubscription(clientId, channel) {
+    const client = this.clients.get(clientId);
+    if (!client) return;
+
+    client.subscriptions.delete(channel);
+
+    switch (channel) {
+      case 'truck_updates':
+        this.subscriptions.truckUpdates.delete(clientId);
+        break;
+      case 'alerts':
+        this.subscriptions.alerts.delete(clientId);
+        break;
+      case 'dashboard':
+        this.subscriptions.dashboard.delete(clientId);
+        break;
+    }
+
+    console.log(`🔕 Client ${clientId} unsubscribed from ${channel}`);
+  }
+
+  // Handle client disconnect
+  handleDisconnect(clientId) {
+    const client = this.clients.get(clientId);
+    if (!client) return;
+
+    // Remove from all subscriptions
+    this.subscriptions.truckUpdates.delete(clientId);
+    this.subscriptions.alerts.delete(clientId);
+    this.subscriptions.dashboard.delete(clientId);
+
+    // Remove client
+    this.clients.delete(clientId);
+  }
+
+  // Send message to client
+  sendMessage(ws, message) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(message));
+    }
+  }
+
+  // Send error to client
+  sendError(ws, code, message, requestId = null) {
+    this.sendMessage(ws, {
+      type: 'error',
+      requestId,
+      error: {
+        code,
+        message
+      }
     });
   }
-});
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/trucks', authMiddleware, truckRoutes);
-app.use('/api/dashboard', authMiddleware, dashboardRoutes);
-app.use('/api/mining-area', authMiddleware, miningAreaRoutes);
+  // Broadcast to subscribed clients
+  broadcastToSubscription(subscription, message) {
+    for (const clientId of subscription) {
+      const client = this.clients.get(clientId);
+      if (client && client.ws.readyState === WebSocket.OPEN) {
+        this.sendMessage(client.ws, message);
+      } else {
+        // Clean up dead connections
+        subscription.delete(clientId);
+        this.clients.delete(clientId);
+      }
+    }
+  }
 
-// Root endpoint
-app.get('/', (req, res) => {
-  res.json({
-    name: 'Fleet Management API',
-    version: '2.0.0',
-    description: 'Mining truck fleet management system with Prisma integration',
-    status: 'running',
-    database: isReady ? 'connected' : 'connecting',
-    endpoints: {
-      health: '/health',
-      status: '/api/status',
-      auth: '/api/auth',
-      trucks: '/api/trucks',
-      dashboard: '/api/dashboard',
-      miningArea: '/api/mining-area'
-    },
-    websocket: {
-      enabled: true,
-      events: ['trucksLocationUpdate', 'newAlerts', 'truckStatusUpdate']
-    },
-    documentation: 'https://github.com/your-repo/fleet-management-api'
-  });
-});
+  // Start real-time data broadcasting
+  startRealtimeBroadcast() {
+    // Truck location updates
+    setInterval(async () => {
+      if (!this.isReady || this.subscriptions.truckUpdates.size === 0) return;
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Endpoint not found',
-    availableEndpoints: [
-      'GET /',
-      'GET /health',
-      'GET /api/status',
-      'POST /api/auth/login',
-      'GET /api/trucks',
-      'GET /api/dashboard/stats',
-      'GET /api/mining-area'
-    ]
-  });
-});
+      try {
+        const locations = await prismaService.getRealtimeLocations();
+        this.broadcastToSubscription(this.subscriptions.truckUpdates, {
+          type: 'truck_locations_update',
+          data: locations,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error('❌ Error broadcasting truck locations:', error);
+      }
+    }, 30000); // Every 30 seconds
 
-// Global error handler
-app.use(errorHandler);
+    // Alert monitoring
+    setInterval(async () => {
+      if (!this.isReady || this.subscriptions.alerts.size === 0) return;
+
+      try {
+        const recentAlerts = await prismaService.prisma.truckAlert.findMany({
+          where: {
+            isResolved: false,
+            createdAt: {
+              gte: new Date(Date.now() - 60000) // Last minute
+            }
+          },
+          include: {
+            truck: {
+              select: {
+                truckNumber: true
+              }
+            }
+          },
+          orderBy: {
+            createdAt: 'desc'
+          }
+        });
+
+        if (recentAlerts.length > 0) {
+          this.broadcastToSubscription(this.subscriptions.alerts, {
+            type: 'new_alerts',
+            data: recentAlerts.map(alert => ({
+              id: alert.id,
+              type: alert.alertType,
+              severity: alert.severity,
+              message: alert.message,
+              truckNumber: alert.truck.truckNumber,
+              createdAt: alert.createdAt
+            })),
+            timestamp: new Date().toISOString()
+          });
+        }
+      } catch (error) {
+        console.error('❌ Error broadcasting alerts:', error);
+      }
+    }, 15000); // Every 15 seconds
+
+    // Dashboard updates
+    setInterval(async () => {
+      if (!this.isReady || this.subscriptions.dashboard.size === 0) return;
+
+      try {
+        const dashboardData = await this.getDashboardData();
+        this.broadcastToSubscription(this.subscriptions.dashboard, {
+          type: 'dashboard_update',
+          data: dashboardData,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error('❌ Error broadcasting dashboard updates:', error);
+      }
+    }, 60000); // Every minute
+
+    // Connection health check
+    setInterval(() => {
+      for (const [clientId, client] of this.clients) {
+        if (client.ws.readyState === WebSocket.OPEN) {
+          client.ws.ping();
+        } else {
+          this.handleDisconnect(clientId);
+        }
+      }
+    }, 30000); // Every 30 seconds
+
+    console.log('📡 Real-time broadcasts started');
+  }
+
+  // ==========================================
+  // DATA SERVICE METHODS
+  // ==========================================
+
+  async getTrucks(filters = {}) {
+    if (!this.isReady) throw new Error('Database not ready');
+
+    return await prismaService.prisma.truck.findMany({
+      where: filters,
+      include: {
+        currentLocation: true,
+        alerts: {
+          where: { isResolved: false }
+        }
+      },
+      orderBy: {
+        truckNumber: 'asc'
+      }
+    });
+  }
+
+  async getTruckDetails(truckId) {
+    if (!this.isReady) throw new Error('Database not ready');
+
+    return await prismaService.prisma.truck.findUnique({
+      where: { id: truckId },
+      include: {
+        currentLocation: true,
+        alerts: {
+          orderBy: { createdAt: 'desc' },
+          take: 10
+        },
+        maintenanceRecords: {
+          orderBy: { scheduledDate: 'desc' },
+          take: 5
+        }
+      }
+    });
+  }
+
+  async getDashboardData() {
+    if (!this.isReady) throw new Error('Database not ready');
+
+    const [
+      totalTrucks,
+      activeTrucks,
+      unresolvedAlerts,
+      recentMaintenances
+    ] = await Promise.all([
+      prismaService.prisma.truck.count(),
+      prismaService.prisma.truck.count({
+        where: { status: 'ACTIVE' }
+      }),
+      prismaService.prisma.truckAlert.count({
+        where: { isResolved: false }
+      }),
+      prismaService.prisma.maintenanceRecord.count({
+        where: {
+          scheduledDate: {
+            gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) // Last 7 days
+          }
+        }
+      })
+    ]);
+
+    return {
+      fleet: {
+        total: totalTrucks,
+        active: activeTrucks,
+        inactive: totalTrucks - activeTrucks
+      },
+      alerts: {
+        unresolved: unresolvedAlerts
+      },
+      maintenance: {
+        recentCount: recentMaintenances
+      }
+    };
+  }
+
+  async getUnresolvedAlerts() {
+    if (!this.isReady) throw new Error('Database not ready');
+
+    return await prismaService.prisma.truckAlert.findMany({
+      where: { isResolved: false },
+      include: {
+        truck: {
+          select: {
+            truckNumber: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+  }
+
+  async updateTruckStatus(truckId, status) {
+    if (!this.isReady) throw new Error('Database not ready');
+
+    return await prismaService.prisma.truck.update({
+      where: { id: truckId },
+      data: { status }
+    });
+  }
+
+  async resolveAlert(alertId) {
+    if (!this.isReady) throw new Error('Database not ready');
+
+    return await prismaService.prisma.truckAlert.update({
+      where: { id: alertId },
+      data: {
+        isResolved: true,
+        resolvedAt: new Date()
+      }
+    });
+  }
+
+  async getSystemHealth() {
+    const health = await prismaService.healthCheck();
+    const connectionInfo = await prismaService.getConnectionInfo();
+
+    return {
+      database: {
+        status: health.status,
+        name: connectionInfo.database_name,
+        connections: connectionInfo.active_connections
+      },
+      websocket: {
+        connectedClients: this.clients.size,
+        subscriptions: {
+          truckUpdates: this.subscriptions.truckUpdates.size,
+          alerts: this.subscriptions.alerts.size,
+          dashboard: this.subscriptions.dashboard.size
+        }
+      },
+      server: {
+        environment: NODE_ENV,
+        uptime: process.uptime(),
+        memory: process.memoryUsage()
+      }
+    };
+  }
+
+  // Graceful shutdown
+  async shutdown() {
+    console.log('📴 Starting WebSocket server shutdown...');
+
+    // Close all client connections
+    for (const [clientId, client] of this.clients) {
+      client.ws.close(1000, 'Server shutdown');
+    }
+
+    // Close WebSocket server
+    if (this.wss) {
+      this.wss.close();
+      console.log('📡 WebSocket server closed');
+    }
+
+    // Close HTTP server
+    if (this.server) {
+      this.server.close();
+      console.log('🔌 HTTP server closed');
+    }
+
+    // Disconnect database
+    await prismaService.disconnect();
+    console.log('🗃️  Database connections closed');
+  }
+}
 
 // ==========================================
 // SERVER STARTUP
 // ==========================================
 
+const wsServer = new WebSocketServer();
+
 const startServer = async () => {
+  const startTime = Date.now();
+  
   try {
-    // Initialize database first
-    await initializeDatabase();
-    
-    // Start server
+    const server = await wsServer.initialize();
+
     server.listen(PORT, () => {
-      console.log('🚀 ================================');
-      console.log(`🚛 Fleet Management API v2.0.0`);
-      console.log('🚀 ================================');
-      console.log(`📡 Server running on port ${PORT}`);
-      console.log(`🌍 Environment: ${NODE_ENV}`);
-      console.log(`🔗 Health check: http://localhost:${PORT}/health`);
-      console.log(`📊 API Status: http://localhost:${PORT}/api/status`);
-      console.log(`🏠 Base URL: http://localhost:${PORT}`);
-      console.log('🚀 ================================');
+      const bootTime = Date.now() - startTime;
       
+      console.log('🚀 ================================');
+      console.log(`🚛 Fleet Management WebSocket Server`);
+      console.log('🚀 ================================');
+      console.log(`📡 WebSocket server running on port ${PORT}`);
+      console.log(`🌍 Environment: ${NODE_ENV}`);
+      console.log(`🔗 WebSocket URL: ws://localhost:${PORT}/ws`);
+      console.log('🚀 ================================');
+
+      // Log server startup
+      logServerStartup({
+        port: PORT,
+        environment: NODE_ENV,
+        websocketUrl: `ws://localhost:${PORT}/ws`,
+        databaseStatus: wsServer.isReady ? 'connected' : 'disconnected',
+        startupTime: bootTime,
+        adminId: 'system',
+        serverVersion: '2.0.0'
+      });
+
       if (NODE_ENV === 'development') {
         console.log('🔧 Development mode features:');
         console.log('   • Detailed error messages');
-        console.log('   • Request logging');
-        console.log('   • CORS permissive mode');
+        console.log('   • Connection logging');
         console.log('   • Prisma query logging');
+        console.log('   • Admin activity logging');
         console.log(`   • Prisma Studio: npx prisma studio`);
+        console.log(`   • Admin logs: log/admin-activity.log`);
         console.log('🚀 ================================');
       }
-      
-      // Start real-time broadcast
-      startRealtimeBroadcast();
-      console.log('📡 Real-time broadcasts started');
     });
-    
+
   } catch (error) {
     console.error('❌ Server startup failed:', error);
+    logError(error, { 
+      context: 'server_startup',
+      port: PORT,
+      environment: NODE_ENV 
+    });
     process.exit(1);
   }
 };
@@ -380,27 +757,17 @@ const startServer = async () => {
 
 const gracefulShutdown = async (signal) => {
   console.log(`\n📴 Received ${signal}. Starting graceful shutdown...`);
-  
+
+  // Log server shutdown
+  logServerShutdown(signal);
+
   try {
-    // Close server
-    server.close(() => {
-      console.log('🔌 HTTP server closed');
-    });
-    
-    // Close Socket.IO connections
-    io.close(() => {
-      console.log('📡 WebSocket connections closed');
-    });
-    
-    // Disconnect Prisma
-    await prismaService.disconnect();
-    console.log('🗃️  Database connections closed');
-    
+    await wsServer.shutdown();
     console.log('✅ Graceful shutdown completed');
     process.exit(0);
-    
   } catch (error) {
     console.error('❌ Error during shutdown:', error);
+    logError(error, { context: 'graceful_shutdown', signal });
     process.exit(1);
   }
 };
@@ -420,11 +787,7 @@ process.on('unhandledRejection', (reason, promise) => {
   gracefulShutdown('UNHANDLED_REJECTION');
 });
 
-// ==========================================
-// START APPLICATION
-// ==========================================
-
+// Start the server
 startServer();
 
-// Export for testing
-module.exports = { app, server, io };
+module.exports = { wsServer };
