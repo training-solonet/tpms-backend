@@ -1,346 +1,484 @@
+// scripts/history-seeder.js
+// History data seeder using Prisma ORM for Fleet Management System
+
 const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const moment = require('moment');
 
-// Koordinat area PT INDOBARA
-const PT_INDOBARA_BOUNDS = {
-  minLat: -3.717200000114277,
-  maxLat: -3.431898966201222,
-  minLng: 115.432199323066001,
-  maxLng: 115.658299919322602
-};
+const prisma = new PrismaClient({
+  log: ['query', 'info', 'warn', 'error'],
+});
 
-// Fungsi untuk generate koordinat random dalam bounds
-const generateRandomLocation = (baseLat, baseLng, radiusKm = 5) => {
-  const radiusInDegrees = radiusKm / 111; // Approximation: 1 degree = 111 km
-  
-  const lat = baseLat + (Math.random() - 0.5) * 2 * radiusInDegrees;
-  const lng = baseLng + (Math.random() - 0.5) * 2 * radiusInDegrees;
-  
-  // Ensure within PT INDOBARA bounds
-  return {
-    latitude: Math.max(PT_INDOBARA_BOUNDS.minLat, Math.min(PT_INDOBARA_BOUNDS.maxLat, lat)),
-    longitude: Math.max(PT_INDOBARA_BOUNDS.minLng, Math.min(PT_INDOBARA_BOUNDS.maxLng, lng))
-  };
-};
-
-// Fungsi untuk generate realistic truck movement pattern
-const generateTruckMovementPattern = (startLat, startLng, duration = 24) => {
-  const movements = [];
-  let currentLat = startLat;
-  let currentLng = startLng;
-  let currentSpeed = 0;
-  let currentHeading = Math.floor(Math.random() * 360);
-  let currentFuel = 85 + Math.random() * 15; // Start with 85-100% fuel
-  
-  const intervalMinutes = 15; // Data point every 15 minutes
-  const totalPoints = (duration * 60) / intervalMinutes;
-  
-  for (let i = 0; i < totalPoints; i++) {
-    const timestamp = new Date();
-    timestamp.setMinutes(timestamp.getMinutes() - (i * intervalMinutes));
-    
-    // Simulate different truck states
-    const state = Math.random();
-    if (state < 0.1) {
-      // 10% chance: Stationary (loading/unloading)
-      currentSpeed = 0;
-    } else if (state < 0.3) {
-      // 20% chance: Slow movement (maneuvering)
-      currentSpeed = 5 + Math.random() * 15;
-      const newLocation = generateRandomLocation(currentLat, currentLng, 0.5);
-      currentLat = newLocation.latitude;
-      currentLng = newLocation.longitude;
-      currentHeading += (Math.random() - 0.5) * 60; // Change heading
-    } else {
-      // 70% chance: Normal movement
-      currentSpeed = 20 + Math.random() * 40;
-      const newLocation = generateRandomLocation(currentLat, currentLng, 2);
-      currentLat = newLocation.latitude;
-      currentLng = newLocation.longitude;
-      currentHeading += (Math.random() - 0.5) * 30;
+// PT INDOBARA mining area configuration
+const MINING_CONFIG = {
+  bounds: {
+    minLat: -3.717200,
+    maxLat: -3.431898,
+    minLng: 115.432199,
+    maxLng: 115.658300
+  },
+  workZones: {
+    mainPit: { lat: -3.545400, lng: 115.604400 },
+    processing: { lat: -3.650000, lng: 115.575000 },
+    maintenance: { lat: -3.520000, lng: 115.620000 },
+    wasteDump: { lat: -3.700000, lng: 115.500000 },
+    coalStockpile: { lat: -3.550000, lng: 115.580000 }
+  },
+  routes: [
+    {
+      name: "Main Production Route",
+      waypoints: [
+        { lat: -3.545400, lng: 115.604400, zone: "Main Pit" },
+        { lat: -3.580000, lng: 115.590000, zone: "Transport" },
+        { lat: -3.650000, lng: 115.575000, zone: "Processing" }
+      ]
+    },
+    {
+      name: "Waste Disposal Route", 
+      waypoints: [
+        { lat: -3.650000, lng: 115.575000, zone: "Processing" },
+        { lat: -3.675000, lng: 115.540000, zone: "Transport" },
+        { lat: -3.700000, lng: 115.500000, zone: "Waste Dump" }
+      ]
+    },
+    {
+      name: "Maintenance Circuit",
+      waypoints: [
+        { lat: -3.520000, lng: 115.620000, zone: "Maintenance" },
+        { lat: -3.530000, lng: 115.610000, zone: "Yard" },
+        { lat: -3.540000, lng: 115.600000, zone: "Inspection" },
+        { lat: -3.520000, lng: 115.620000, zone: "Maintenance" }
+      ]
     }
-    
-    // Normalize heading
-    currentHeading = ((currentHeading % 360) + 360) % 360;
-    
-    // Simulate fuel consumption
-    currentFuel -= (currentSpeed * intervalMinutes) / (60 * 30); // Rough consumption model
-    currentFuel = Math.max(10, currentFuel); // Minimum 10% fuel
-    
-    movements.push({
-      latitude: parseFloat(currentLat.toFixed(8)),
-      longitude: parseFloat(currentLng.toFixed(8)),
-      speed: parseFloat(currentSpeed.toFixed(2)),
-      heading: Math.round(currentHeading),
-      fuelPercentage: parseFloat(currentFuel.toFixed(2)),
-      recordedAt: timestamp
-    });
-  }
-  
-  return movements.reverse(); // Return chronological order
+  ]
 };
 
-// Fungsi untuk generate maintenance history
-const generateMaintenanceHistory = async (truckId) => {
-  const maintenanceTypes = [
-    'Routine Service',
-    'Tire Replacement',
-    'Engine Maintenance',
-    'Hydraulic System Check',
-    'Brake Inspection',
-    'Electrical System Check',
-    'Transmission Service',
-    'Cooling System Maintenance'
-  ];
-  
-  const maintenanceRecords = [];
-  const recordCount = 3 + Math.floor(Math.random() * 5); // 3-7 records per truck
-  
-  for (let i = 0; i < recordCount; i++) {
-    const daysAgo = Math.floor(Math.random() * 365); // Within last year
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - daysAgo);
-    
-    const duration = 1 + Math.floor(Math.random() * 5); // 1-5 days
-    const endDate = new Date(startDate);
-    endDate.setDate(endDate.getDate() + duration);
-    
-    const maintenanceType = maintenanceTypes[Math.floor(Math.random() * maintenanceTypes.length)];
-    
-    maintenanceRecords.push({
-      truckId: truckId,
-      maintenanceType: maintenanceType,
-      description: `${maintenanceType} performed on truck. All systems checked and serviced according to schedule.`,
-      startDate: startDate,
-      endDate: endDate,
-      cost: parseFloat((500 + Math.random() * 4500).toFixed(2)), // $500-$5000
-      technicianName: `Technician ${Math.floor(Math.random() * 20) + 1}`,
-      isCompleted: true,
-      createdAt: startDate
-    });
+class HistorySeeder {
+  constructor(options = {}) {
+    this.options = {
+      daysBack: options.daysBack || 7,
+      recordsPerDay: options.recordsPerDay || 100,
+      batchSize: options.batchSize || 200,
+      truckLimit: options.truckLimit || null,
+      deleteExisting: options.deleteExisting || false,
+      verbose: options.verbose || true,
+      ...options
+    };
   }
-  
-  return maintenanceRecords;
-};
 
-// Fungsi untuk generate tire pressure history
-const generateTirePressureHistory = async (truckId) => {
-  const tirePositions = [
-    'front_left', 'front_right', 
-    'middle_left', 'middle_right', 
-    'rear_left', 'rear_right'
-  ];
-  
-  const pressureHistory = [];
-  const daysHistory = 30; // 30 days of history
-  
-  for (let day = 0; day < daysHistory; day++) {
-    for (let tireNum = 1; tireNum <= 6; tireNum++) {
-      const recordDate = new Date();
-      recordDate.setDate(recordDate.getDate() - day);
-      recordDate.setHours(8 + Math.floor(Math.random() * 8)); // Random time 8AM-4PM
-      
-      // Base pressure with some variation over time
-      const basePressure = 95 + Math.sin(day * 0.1) * 10; // Seasonal variation
-      const pressure = basePressure + (Math.random() - 0.5) * 20; // Daily variation
-      const temperature = 65 + Math.random() * 30; // 65-95°C
-      
-      let status = 'normal';
-      if (pressure < 85) status = 'low';
-      else if (pressure > 115) status = 'high';
-      
-      pressureHistory.push({
-        truckId: truckId,
-        tirePosition: tirePositions[tireNum - 1],
-        tireNumber: tireNum,
-        pressurePsi: parseFloat(pressure.toFixed(1)),
-        status: status,
-        temperature: parseFloat(temperature.toFixed(2)),
-        recordedAt: recordDate
+  log(message, level = 'info') {
+    if (!this.options.verbose && level === 'info') return;
+    
+    const timestamp = moment().format('HH:mm:ss');
+    const prefix = {
+      'info': '📊',
+      'success': '✅',
+      'error': '❌',
+      'warning': '⚠️'
+    }[level] || 'ℹ️';
+    
+    console.log(`${prefix} [${timestamp}] ${message}`);
+  }
+
+  async getTrucks() {
+    try {
+      const where = {};
+      const trucks = await prisma.truck.findMany({
+        where,
+        take: this.options.truckLimit,
+        orderBy: { truckNumber: 'asc' },
+        include: {
+          model: {
+            select: {
+              name: true,
+              manufacturer: true,
+              capacityTons: true
+            }
+          }
+        }
       });
+
+      this.log(`Found ${trucks.length} trucks to process`);
+      return trucks;
+    } catch (error) {
+      this.log(`Error fetching trucks: ${error.message}`, 'error');
+      throw error;
     }
   }
-  
-  return pressureHistory;
-};
 
-// Fungsi untuk generate alert history
-const generateAlertHistory = async (truckId) => {
-  const alertTypes = [
-    'Low Fuel Warning',
-    'Engine Temperature High',
-    'Tire Pressure Alert',
-    'Scheduled Maintenance Due',
-    'GPS Signal Lost',
-    'Overload Warning',
-    'Battery Voltage Low',
-    'Hydraulic Pressure Alert',
-    'Speed Limit Exceeded',
-    'Unauthorized Engine Start'
-  ];
-  
-  const severities = ['low', 'medium', 'high', 'critical'];
-  const severityWeights = [0.4, 0.35, 0.2, 0.05]; // Most alerts are low-medium severity
-  
-  const alertHistory = [];
-  const alertCount = Math.floor(Math.random() * 15) + 5; // 5-19 alerts per truck
-  
-  for (let i = 0; i < alertCount; i++) {
-    const daysAgo = Math.floor(Math.random() * 90); // Within last 3 months
-    const createdAt = new Date();
-    createdAt.setDate(createdAt.getDate() - daysAgo);
+  generateRealisticMovement(truck, startTime, endTime) {
+    const movements = [];
+    const isActive = truck.status === 'ACTIVE';
+    const route = MINING_CONFIG.routes[Math.floor(Math.random() * MINING_CONFIG.routes.length)];
     
-    const alertType = alertTypes[Math.floor(Math.random() * alertTypes.length)];
-    
-    // Select severity based on weights
-    const rand = Math.random();
-    let severity = 'low';
-    let cumulativeWeight = 0;
-    for (let j = 0; j < severities.length; j++) {
-      cumulativeWeight += severityWeights[j];
-      if (rand < cumulativeWeight) {
-        severity = severities[j];
-        break;
-      }
-    }
-    
-    const isResolved = Math.random() < 0.8; // 80% resolved
-    const resolvedAt = isResolved ? new Date(createdAt.getTime() + Math.random() * 86400000 * 3) : null; // Resolved within 3 days
-    
-    alertHistory.push({
-      truckId: truckId,
-      alertType: alertType,
-      severity: severity,
-      message: `${alertType}: Detected on truck ${truckId}. ${isResolved ? 'Issue resolved.' : 'Awaiting resolution.'}`,
-      isResolved: isResolved,
-      createdAt: createdAt,
-      resolvedAt: resolvedAt
-    });
-  }
-  
-  return alertHistory;
-};
+    let currentTime = moment(startTime);
+    let currentPosition = {
+      lat: truck.latitude || this.getRandomPositionInBounds().lat,
+      lng: truck.longitude || this.getRandomPositionInBounds().lng
+    };
+    let currentFuel = truck.fuelPercentage || (60 + Math.random() * 40);
+    let waypointIndex = 0;
+    let heading = truck.heading || Math.floor(Math.random() * 360);
 
-// Main seeder function
-const seedHistoryData = async () => {
-  console.log('🌱 Starting history data seeding...');
-  
-  try {
-    // Get all active trucks
-    const trucks = await prisma.truck.findMany({
-      where: { status: 'active' },
-      take: 100 // Limit to first 100 trucks for demo
-    });
-    
-    console.log(`Found ${trucks.length} active trucks for history generation`);
-    
-    let processedCount = 0;
-    
-    for (const truck of trucks) {
-      console.log(`\n📊 Processing truck ${truck.truckNumber} (${++processedCount}/${trucks.length})`);
+    while (currentTime.isBefore(endTime)) {
+      const hour = currentTime.hour();
+      const isWorkHours = hour >= 6 && hour <= 18;
+      const shiftActivity = isWorkHours ? 0.8 : 0.3;
       
-      // Generate location history
-      if (truck.latitude && truck.longitude) {
-        console.log('  📍 Generating location history...');
-        const movements = generateTruckMovementPattern(
-          parseFloat(truck.latitude.toString()),
-          parseFloat(truck.longitude.toString()),
-          48 // 48 hours of history
-        );
+      let speed = 0;
+      
+      if (isActive && Math.random() < shiftActivity) {
+        // Active movement
+        const targetWaypoint = route.waypoints[waypointIndex];
+        const distanceToTarget = this.calculateDistance(currentPosition, targetWaypoint);
         
-        await prisma.locationHistory.createMany({
-          data: movements.map(movement => ({
+        if (distanceToTarget < 0.005) { // ~500m threshold
+          waypointIndex = (waypointIndex + 1) % route.waypoints.length;
+        }
+        
+        // Move towards target
+        const moveDistance = 0.0008 + Math.random() * 0.0004;
+        currentPosition = this.moveTowards(currentPosition, targetWaypoint, moveDistance);
+        currentPosition = this.keepInBounds(currentPosition);
+        
+        heading = this.calculateHeading(currentPosition, targetWaypoint);
+        speed = this.generateSpeedForZone(targetWaypoint.zone, isWorkHours);
+        
+        // Fuel consumption
+        const consumption = (speed * 0.02 + Math.random() * 0.1);
+        currentFuel = Math.max(5, currentFuel - consumption);
+        
+        // Random refueling
+        if (currentFuel < 20 && Math.random() < 0.1) {
+          currentFuel = 85 + Math.random() * 15;
+        }
+      }
+
+      // Create movement record
+      movements.push({
+        truckId: truck.id,
+        latitude: parseFloat(currentPosition.lat.toFixed(8)),
+        longitude: parseFloat(currentPosition.lng.toFixed(8)),
+        speed: parseFloat(speed.toFixed(2)),
+        heading: Math.round(heading),
+        fuelPercentage: parseFloat(currentFuel.toFixed(2)),
+        recordedAt: currentTime.toDate()
+      });
+
+      // Next interval
+      const interval = isActive ? (2 + Math.random() * 6) : (10 + Math.random() * 15);
+      currentTime.add(interval, 'minutes');
+    }
+
+    return movements;
+  }
+
+  generateSpeedForZone(zone, isWorkHours) {
+    const baseSpeed = isWorkHours ? 20 : 12;
+    const variation = isWorkHours ? 15 : 8;
+    
+    const zoneMultiplier = {
+      'Main Pit': 0.6,      // Slow in pit
+      'Processing': 0.7,    // Moderate in processing
+      'Transport': 1.2,     // Fast on transport routes
+      'Maintenance': 0.4,   // Very slow in maintenance
+      'Waste Dump': 0.8,    // Moderate in waste area
+      'Yard': 0.5,          // Slow in yard
+      'Inspection': 0.3     // Very slow during inspection
+    }[zone] || 1.0;
+    
+    return Math.max(0, (baseSpeed + Math.random() * variation) * zoneMultiplier);
+  }
+
+  calculateDistance(pos1, pos2) {
+    return Math.sqrt(Math.pow(pos2.lat - pos1.lat, 2) + Math.pow(pos2.lng - pos1.lng, 2));
+  }
+
+  calculateHeading(from, to) {
+    const deltaLng = to.lng - from.lng;
+    const deltaLat = to.lat - from.lat;
+    const heading = Math.atan2(deltaLng, deltaLat) * (180 / Math.PI);
+    return (heading + 360) % 360;
+  }
+
+  moveTowards(current, target, distance) {
+    const totalDistance = this.calculateDistance(current, target);
+    if (totalDistance === 0) return current;
+    
+    const ratio = Math.min(distance / totalDistance, 1);
+    
+    return {
+      lat: current.lat + (target.lat - current.lat) * ratio + (Math.random() - 0.5) * 0.0002,
+      lng: current.lng + (target.lng - current.lng) * ratio + (Math.random() - 0.5) * 0.0002
+    };
+  }
+
+  keepInBounds(position) {
+    return {
+      lat: Math.max(MINING_CONFIG.bounds.minLat, 
+            Math.min(MINING_CONFIG.bounds.maxLat, position.lat)),
+      lng: Math.max(MINING_CONFIG.bounds.minLng, 
+            Math.min(MINING_CONFIG.bounds.maxLng, position.lng))
+    };
+  }
+
+  getRandomPositionInBounds() {
+    return {
+      lat: MINING_CONFIG.bounds.minLat + 
+           Math.random() * (MINING_CONFIG.bounds.maxLat - MINING_CONFIG.bounds.minLat),
+      lng: MINING_CONFIG.bounds.minLng + 
+           Math.random() * (MINING_CONFIG.bounds.maxLng - MINING_CONFIG.bounds.minLng)
+    };
+  }
+
+  async insertHistoryBatch(historyData) {
+    try {
+      const result = await prisma.locationHistory.createMany({
+        data: historyData,
+        skipDuplicates: true
+      });
+      return result.count;
+    } catch (error) {
+      this.log(`Batch insert error: ${error.message}`, 'error');
+      throw error;
+    }
+  }
+
+  async generateSpecialScenarios() {
+    this.log('Generating special scenarios...');
+    
+    try {
+      // 1. Breakdown incidents
+      const breakdownTrucks = await prisma.truck.findMany({
+        where: { status: 'ACTIVE' },
+        take: 3
+      });
+
+      for (const truck of breakdownTrucks) {
+        const breakdownTime = moment().subtract(Math.floor(Math.random() * 48), 'hours');
+        const breakdownPosition = this.getRandomPositionInBounds();
+        const breakdownData = [];
+
+        // Generate 2 hours of stationary records
+        for (let i = 0; i < 24; i++) {
+          breakdownData.push({
             truckId: truck.id,
-            ...movement
-          })),
-          skipDuplicates: true
-        });
-        
-        console.log(`    ✅ Created ${movements.length} location records`);
+            latitude: breakdownPosition.lat,
+            longitude: breakdownPosition.lng,
+            speed: 0,
+            heading: Math.floor(Math.random() * 360),
+            fuelPercentage: 25 + Math.random() * 30,
+            recordedAt: breakdownTime.clone().add(i * 5, 'minutes').toDate()
+          });
+        }
+
+        await this.insertHistoryBatch(breakdownData);
       }
-      
-      // Generate tire pressure history
-      console.log('  🔧 Generating tire pressure history...');
-      const tirePressureRecords = await generateTirePressureHistory(truck.id);
-      
-      // Delete existing records to avoid duplicates
-      await prisma.tirePressure.deleteMany({
-        where: { truckId: truck.id }
+
+      // 2. High-activity periods (loading/unloading)
+      const activeTrucks = await prisma.truck.findMany({
+        where: { status: 'ACTIVE' },
+        take: 5
       });
-      
-      await prisma.tirePressure.createMany({
-        data: tirePressureRecords,
-        skipDuplicates: true
-      });
-      
-      console.log(`    ✅ Created ${tirePressureRecords.length} tire pressure records`);
-      
-      // Generate maintenance history
-      console.log('  🔨 Generating maintenance history...');
-      const maintenanceRecords = await generateMaintenanceHistory(truck.id);
-      
-      for (const record of maintenanceRecords) {
-        await prisma.maintenanceRecord.create({
-          data: record
-        });
+
+      for (const truck of activeTrucks) {
+        const activityTime = moment().subtract(Math.floor(Math.random() * 24), 'hours');
+        const loadingZone = MINING_CONFIG.workZones.mainPit;
+        const activityData = [];
+
+        // Generate 1 hour of intensive activity
+        for (let i = 0; i < 60; i++) {
+          const position = {
+            lat: loadingZone.lat + (Math.random() - 0.5) * 0.002,
+            lng: loadingZone.lng + (Math.random() - 0.5) * 0.002
+          };
+
+          activityData.push({
+            truckId: truck.id,
+            latitude: position.lat,
+            longitude: position.lng,
+            speed: Math.random() * 8, // Slow speeds during loading
+            heading: Math.floor(Math.random() * 360),
+            fuelPercentage: 70 + Math.random() * 20,
+            recordedAt: activityTime.clone().add(i, 'minutes').toDate()
+          });
+        }
+
+        await this.insertHistoryBatch(activityData);
       }
-      
-      console.log(`    ✅ Created ${maintenanceRecords.length} maintenance records`);
-      
-      // Generate alert history
-      console.log('  🚨 Generating alert history...');
-      const alertRecords = await generateAlertHistory(truck.id);
-      
-      await prisma.truckAlert.createMany({
-        data: alertRecords,
-        skipDuplicates: true
-      });
-      
-      console.log(`    ✅ Created ${alertRecords.length} alert records`);
+
+      this.log('Special scenarios generated', 'success');
+    } catch (error) {
+      this.log(`Error generating special scenarios: ${error.message}`, 'error');
     }
-    
-    // Generate summary statistics
-    console.log('\n📈 Generating summary statistics...');
-    
-    const stats = await prisma.$queryRaw`
-      SELECT 
-        (SELECT COUNT(*) FROM location_history) as location_records,
-        (SELECT COUNT(*) FROM tire_pressures) as tire_pressure_records,
-        (SELECT COUNT(*) FROM maintenance_records) as maintenance_records,
-        (SELECT COUNT(*) FROM truck_alerts) as alert_records,
-        (SELECT COUNT(DISTINCT truck_id) FROM location_history) as trucks_with_history
-    `;
-    
-    console.log('\n🎉 History data seeding completed!');
-    console.log('📊 Final Statistics:');
-    console.log(`   📍 Location Records: ${stats[0].location_records}`);
-    console.log(`   🔧 Tire Pressure Records: ${stats[0].tire_pressure_records}`);
-    console.log(`   🔨 Maintenance Records: ${stats[0].maintenance_records}`);
-    console.log(`   🚨 Alert Records: ${stats[0].alert_records}`);
-    console.log(`   🚛 Trucks with History: ${stats[0].trucks_with_history}`);
-    
-  } catch (error) {
-    console.error('❌ Error seeding history data:', error);
-    throw error;
-  } finally {
-    await prisma.$disconnect();
   }
-};
+
+  async run() {
+    try {
+      this.log('🚛 Starting Fleet History Data Generation');
+      this.log('=' .repeat(60));
+      this.log(`Configuration: ${this.options.daysBack} days, ${this.options.recordsPerDay} records/day`);
+      
+      const startTime = Date.now();
+
+      // Clear existing data if requested
+      if (this.options.deleteExisting) {
+        this.log('Clearing existing location history...');
+        const deleted = await prisma.locationHistory.deleteMany();
+        this.log(`Deleted ${deleted.count} existing records`, 'success');
+      }
+
+      // Get trucks
+      const trucks = await this.getTrucks();
+      if (trucks.length === 0) {
+        this.log('No trucks found to process', 'warning');
+        return;
+      }
+
+      let totalRecords = 0;
+      let processedTrucks = 0;
+
+      // Process each truck
+      for (const truck of trucks) {
+        try {
+          const startDate = moment().subtract(this.options.daysBack, 'days');
+          const endDate = moment();
+          
+          const historyData = this.generateRealisticMovement(truck, startDate, endDate);
+          
+          // Insert in batches
+          for (let i = 0; i < historyData.length; i += this.options.batchSize) {
+            const batch = historyData.slice(i, i + this.options.batchSize);
+            const inserted = await this.insertHistoryBatch(batch);
+            totalRecords += inserted;
+          }
+
+          processedTrucks++;
+          
+          if (processedTrucks % 25 === 0) {
+            this.log(`Progress: ${processedTrucks}/${trucks.length} trucks (${totalRecords} records)`);
+          }
+
+        } catch (error) {
+          this.log(`Error processing truck ${truck.truckNumber}: ${error.message}`, 'error');
+        }
+      }
+
+      // Generate special scenarios
+      await this.generateSpecialScenarios();
+
+      // Final statistics
+      const endTime = Date.now();
+      const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+      this.log('=' .repeat(60));
+      this.log('✅ History Generation Complete!', 'success');
+      this.log(`📊 Summary:`);
+      this.log(`   • Trucks processed: ${processedTrucks}`);
+      this.log(`   • Total records: ${totalRecords}`);
+      this.log(`   • Average per truck: ${Math.round(totalRecords / processedTrucks)}`);
+      this.log(`   • Processing time: ${duration}s`);
+      this.log(`   • Records/second: ${Math.round(totalRecords / parseFloat(duration))}`);
+
+      // Database verification
+      const finalCount = await prisma.locationHistory.count();
+      const uniqueTrucks = await prisma.locationHistory.groupBy({
+        by: ['truckId'],
+        _count: true
+      });
+
+      this.log(`📈 Verification:`);
+      this.log(`   • Database records: ${finalCount}`);
+      this.log(`   • Trucks with history: ${uniqueTrucks.length}`);
+
+      const speedStats = await prisma.locationHistory.aggregate({
+        _avg: { speed: true },
+        _max: { speed: true },
+        _min: { recordedAt: true },
+        _max: { recordedAt: true }
+      });
+
+      this.log(`   • Date range: ${moment(speedStats._min.recordedAt).format('YYYY-MM-DD')} to ${moment(speedStats._max.recordedAt).format('YYYY-MM-DD')}`);
+      this.log(`   • Average speed: ${parseFloat(speedStats._avg.speed || 0).toFixed(2)} km/h`);
+
+    } catch (error) {
+      this.log(`Fatal error: ${error.message}`, 'error');
+      console.error(error);
+      throw error;
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+}
+
+// CLI runner
+async function main() {
+  const args = process.argv.slice(2);
+  const options = {};
+
+  // Parse CLI arguments
+  for (let i = 0; i < args.length; i += 2) {
+    const key = args[i]?.replace(/^--?/, '');
+    const value = args[i + 1];
+
+    switch (key) {
+      case 'days':
+        options.daysBack = parseInt(value) || 7;
+        break;
+      case 'records':
+        options.recordsPerDay = parseInt(value) || 100;
+        break;
+      case 'batch':
+        options.batchSize = parseInt(value) || 200;
+        break;
+      case 'limit':
+        options.truckLimit = parseInt(value) || null;
+        break;
+      case 'delete':
+        options.deleteExisting = value === 'true' || value === '1';
+        break;
+      case 'quiet':
+        options.verbose = false;
+        break;
+      case 'help':
+        console.log(`
+Fleet Management History Seeder
+
+Usage: node scripts/history-seeder.js [options]
+
+Options:
+  --days <number>     Days of history to generate (default: 7)
+  --records <number>  Records per day per truck (default: 100)
+  --batch <number>    Batch size for inserts (default: 200)
+  --limit <number>    Limit number of trucks (default: all)
+  --delete true|false Delete existing history (default: false)
+  --quiet             Reduce output verbosity
+  --help              Show this help
+
+Examples:
+  node scripts/history-seeder.js --days 14 --delete true
+  node scripts/history-seeder.js --limit 50 --batch 500
+  node scripts/history-seeder.js --days 3 --records 200
+        `);
+        process.exit(0);
+        break;
+    }
+  }
+
+  const seeder = new HistorySeeder(options);
+  await seeder.run();
+}
 
 // Export for use as module
 module.exports = {
-  seedHistoryData,
-  generateTruckMovementPattern,
-  generateMaintenanceHistory,
-  generateTirePressureHistory,
-  generateAlertHistory
+  HistorySeeder,
+  MINING_CONFIG,
+  main
 };
 
 // Run if called directly
 if (require.main === module) {
-  seedHistoryData()
-    .catch(error => {
-      console.error(error);
-      process.exit(1);
-    });
+  main().catch((error) => {
+    console.error('Seeder failed:', error);
+    process.exit(1);
+  });
 }
