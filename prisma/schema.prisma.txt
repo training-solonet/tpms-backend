@@ -1,0 +1,197 @@
+// Fleet Management Database Schema - Full Prisma Implementation
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique @db.VarChar(50)
+  email        String   @unique @db.VarChar(100)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  role         String   @default("operator") @db.VarChar(20)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+// Truck models
+model TruckModel {
+  id               Int      @id @default(autoincrement())
+  name             String   @db.VarChar(50)
+  manufacturer     String   @db.VarChar(50)
+  capacityTons     Int      @map("capacity_tons")
+  fuelTankCapacity Int      @map("fuel_tank_capacity")
+  tireCount        Int      @default(6) @map("tire_count")
+  createdAt        DateTime @default(now()) @map("created_at")
+  
+  // Relations
+  trucks Truck[]
+
+  @@map("truck_models")
+}
+
+// Main Truck model
+model Truck {
+  id               Int      @id @default(autoincrement())
+  truckNumber      String   @unique @map("truck_number") @db.VarChar(20)
+  modelId          Int?     @map("model_id")
+  status           String   @default("active") @db.VarChar(20)
+  latitude         Decimal? @db.Decimal(10, 8)
+  longitude        Decimal? @db.Decimal(11, 8)
+  speed            Decimal  @default(0) @db.Decimal(5, 2)
+  heading          Int      @default(0)
+  fuelPercentage   Decimal  @default(100) @map("fuel_percentage") @db.Decimal(5, 2)
+  payloadTons      Decimal  @default(0) @map("payload_tons") @db.Decimal(6, 2)
+  driverName       String?  @map("driver_name") @db.VarChar(100)
+  engineHours      Int      @default(0) @map("engine_hours")
+  odometer         Int      @default(0)
+  lastMaintenance  DateTime? @map("last_maintenance") @db.Date
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
+
+  // Relations
+  model            TruckModel?      @relation(fields: [modelId], references: [id])
+  tirePressures    TirePressure[]
+  alerts           TruckAlert[]
+  locationHistory  LocationHistory[]
+
+  @@index([latitude, longitude], map: "idx_trucks_coordinates")
+  @@index([status], map: "idx_trucks_status")
+  @@index([updatedAt(sort: Desc)], map: "idx_trucks_updated_at")
+  @@map("trucks")
+}
+
+// Tire pressure monitoring
+model TirePressure {
+  id           Int      @id @default(autoincrement())
+  truckId      Int      @map("truck_id")
+  tirePosition String   @map("tire_position") @db.VarChar(20)
+  tireNumber   Int      @map("tire_number")
+  pressurePsi  Decimal  @map("pressure_psi") @db.Decimal(5, 1)
+  status       String   @default("normal") @db.VarChar(10)
+  temperature  Decimal? @db.Decimal(5, 2)
+  recordedAt   DateTime @default(now()) @map("recorded_at")
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id], onDelete: Cascade)
+
+  @@unique([truckId, tireNumber])
+  @@index([truckId, recordedAt(sort: Desc)], map: "idx_tire_pressures_truck_recorded")
+  @@map("tire_pressures")
+}
+
+// Location tracking history
+model LocationHistory {
+  id             Int      @id @default(autoincrement())
+  truckId        Int      @map("truck_id")
+  latitude       Decimal  @db.Decimal(10, 8)
+  longitude      Decimal  @db.Decimal(11, 8)
+  speed          Decimal  @default(0) @db.Decimal(5, 2)
+  heading        Int      @default(0)
+  fuelPercentage Decimal? @map("fuel_percentage") @db.Decimal(5, 2)
+  recordedAt     DateTime @default(now()) @map("recorded_at")
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id], onDelete: Cascade)
+
+  @@index([truckId, recordedAt(sort: Desc)], map: "idx_location_history_truck_time")
+  @@index([recordedAt(sort: Desc)], map: "idx_location_history_recorded_at")
+  @@map("location_history")
+}
+
+// Truck alerts and notifications
+model TruckAlert {
+  id         Int       @id @default(autoincrement())
+  truckId    Int       @map("truck_id")
+  alertType  String    @map("alert_type") @db.VarChar(50)
+  severity   String    @default("medium") @db.VarChar(20)
+  message    String
+  isResolved Boolean   @default(false) @map("is_resolved")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  resolvedAt DateTime? @map("resolved_at")
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id], onDelete: Cascade)
+
+  @@index([truckId, isResolved], map: "idx_truck_alerts_truck_resolved")
+  @@index([createdAt(sort: Desc)], map: "idx_truck_alerts_created_at")
+  @@map("truck_alerts")
+}
+
+// Mining zones (PostGIS handled with raw SQL)
+model MiningZone {
+  id        Int      @id @default(autoincrement())
+  name      String   @db.VarChar(100)
+  zoneType  String   @map("zone_type") @db.VarChar(50)
+  // Note: PostGIS geometry handled in service layer with raw SQL
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("mining_zones")
+}
+
+// Maintenance records
+model MaintenanceRecord {
+  id              Int       @id @default(autoincrement())
+  truckId         Int       @map("truck_id")
+  maintenanceType String    @map("maintenance_type") @db.VarChar(50)
+  description     String?
+  startDate       DateTime  @map("start_date")
+  endDate         DateTime? @map("end_date")
+  cost            Decimal?  @db.Decimal(10, 2)
+  technicianName  String?   @map("technician_name") @db.VarChar(100)
+  isCompleted     Boolean   @default(false) @map("is_completed")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([truckId, startDate(sort: Desc)], map: "idx_maintenance_truck_date")
+  @@map("maintenance_records")
+}
+
+// Views as models for better type safety
+// Dashboard statistics view
+model DashboardStats {
+  id                   Int     @id @default(1)
+  totalTrucks          Int     @map("total_trucks")
+  activeTrucks         Int     @map("active_trucks")
+  inactiveTrucks       Int     @map("inactive_trucks")
+  maintenanceTrucks    Int     @map("maintenance_trucks")
+  averageFuel          Decimal @map("avg_fuel") @db.Decimal(5, 2)
+  totalPayload         Decimal @map("total_payload") @db.Decimal(10, 2)
+  totalAlerts          Int     @map("total_alerts")
+  lowTirePressureTrucks Int    @map("low_tire_pressure_trucks")
+
+  @@map("dashboard_stats_view")
+  @@ignore // This will be handled with raw SQL
+}
+
+// Truck summary view
+model TruckSummary {
+  id                 Int      @id
+  truckNumber        String   @map("truck_number")
+  modelName          String?  @map("model_name")
+  manufacturer       String?
+  status             String
+  longitude          Decimal? @db.Decimal(11, 8)
+  latitude           Decimal? @db.Decimal(10, 8)
+  speed              Decimal  @db.Decimal(5, 2)
+  heading            Int
+  fuelPercentage     Decimal  @map("fuel_percentage") @db.Decimal(5, 2)
+  payloadTons        Decimal  @map("payload_tons") @db.Decimal(6, 2)
+  driverName         String?  @map("driver_name")
+  engineHours        Int      @map("engine_hours")
+  odometer           Int
+  lastMaintenance    DateTime? @map("last_maintenance")
+  lastUpdate         DateTime @map("last_update")
+  activeAlertsCount  Int      @map("active_alerts_count")
+
+  @@map("truck_summary")
+  @@ignore // This will be handled as raw SQL view
+}

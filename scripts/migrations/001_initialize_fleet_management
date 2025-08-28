@@ -1,0 +1,373 @@
+-- Migration: 001_initialize_fleet_management
+-- This migration creates the complete fleet management schema
+
+-- Enable required extensions
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Users table
+CREATE TABLE "users" (
+    "id" SERIAL NOT NULL,
+    "username" VARCHAR(50) NOT NULL,
+    "email" VARCHAR(100) NOT NULL,
+    "password_hash" VARCHAR(255) NOT NULL,
+    "role" VARCHAR(20) NOT NULL DEFAULT 'operator',
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- Truck models table
+CREATE TABLE "truck_models" (
+    "id" SERIAL NOT NULL,
+    "name" VARCHAR(50) NOT NULL,
+    "manufacturer" VARCHAR(50) NOT NULL,
+    "capacity_tons" INTEGER NOT NULL,
+    "fuel_tank_capacity" INTEGER NOT NULL,
+    "tire_count" INTEGER NOT NULL DEFAULT 6,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "truck_models_pkey" PRIMARY KEY ("id")
+);
+
+-- Main trucks table
+CREATE TABLE "trucks" (
+    "id" SERIAL NOT NULL,
+    "truck_number" VARCHAR(20) NOT NULL,
+    "model_id" INTEGER,
+    "status" VARCHAR(20) NOT NULL DEFAULT 'active',
+    "latitude" DECIMAL(10,8),
+    "longitude" DECIMAL(11,8),
+    "speed" DECIMAL(5,2) NOT NULL DEFAULT 0,
+    "heading" INTEGER NOT NULL DEFAULT 0,
+    "fuel_percentage" DECIMAL(5,2) NOT NULL DEFAULT 100,
+    "payload_tons" DECIMAL(6,2) NOT NULL DEFAULT 0,
+    "driver_name" VARCHAR(100),
+    "engine_hours" INTEGER NOT NULL DEFAULT 0,
+    "odometer" INTEGER NOT NULL DEFAULT 0,
+    "last_maintenance" DATE,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "trucks_pkey" PRIMARY KEY ("id")
+);
+
+-- Tire pressure monitoring
+CREATE TABLE "tire_pressures" (
+    "id" SERIAL NOT NULL,
+    "truck_id" INTEGER NOT NULL,
+    "tire_position" VARCHAR(20) NOT NULL,
+    "tire_number" INTEGER NOT NULL,
+    "pressure_psi" DECIMAL(5,1) NOT NULL,
+    "status" VARCHAR(10) NOT NULL DEFAULT 'normal',
+    "temperature" DECIMAL(5,2),
+    "recorded_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "tire_pressures_pkey" PRIMARY KEY ("id")
+);
+
+-- Location tracking history
+CREATE TABLE "location_history" (
+    "id" SERIAL NOT NULL,
+    "truck_id" INTEGER NOT NULL,
+    "latitude" DECIMAL(10,8) NOT NULL,
+    "longitude" DECIMAL(11,8) NOT NULL,
+    "speed" DECIMAL(5,2) NOT NULL DEFAULT 0,
+    "heading" INTEGER NOT NULL DEFAULT 0,
+    "fuel_percentage" DECIMAL(5,2),
+    "recorded_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "location_history_pkey" PRIMARY KEY ("id")
+);
+
+-- Truck alerts and notifications
+CREATE TABLE "truck_alerts" (
+    "id" SERIAL NOT NULL,
+    "truck_id" INTEGER NOT NULL,
+    "alert_type" VARCHAR(50) NOT NULL,
+    "severity" VARCHAR(20) NOT NULL DEFAULT 'medium',
+    "message" TEXT NOT NULL,
+    "is_resolved" BOOLEAN NOT NULL DEFAULT false,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "resolved_at" TIMESTAMP(3),
+
+    CONSTRAINT "truck_alerts_pkey" PRIMARY KEY ("id")
+);
+
+-- Mining zones table
+CREATE TABLE "mining_zones" (
+    "id" SERIAL NOT NULL,
+    "name" VARCHAR(100) NOT NULL,
+    "zone_type" VARCHAR(50) NOT NULL,
+    "boundary" GEOMETRY(POLYGON, 4326) NOT NULL,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "mining_zones_pkey" PRIMARY KEY ("id")
+);
+
+-- Maintenance records
+CREATE TABLE "maintenance_records" (
+    "id" SERIAL NOT NULL,
+    "truck_id" INTEGER NOT NULL,
+    "maintenance_type" VARCHAR(50) NOT NULL,
+    "description" TEXT,
+    "start_date" TIMESTAMP(3) NOT NULL,
+    "end_date" TIMESTAMP(3),
+    "cost" DECIMAL(10,2),
+    "technician_name" VARCHAR(100),
+    "is_completed" BOOLEAN NOT NULL DEFAULT false,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "maintenance_records_pkey" PRIMARY KEY ("id")
+);
+
+-- Create unique constraints
+CREATE UNIQUE INDEX "users_username_key" ON "users"("username");
+CREATE UNIQUE INDEX "users_email_key" ON "users"("email");
+CREATE UNIQUE INDEX "trucks_truck_number_key" ON "trucks"("truck_number");
+CREATE UNIQUE INDEX "tire_pressures_truck_id_tire_number_key" ON "tire_pressures"("truck_id", "tire_number");
+
+-- Create regular indexes for performance
+CREATE INDEX "idx_trucks_coordinates" ON "trucks"("latitude", "longitude");
+CREATE INDEX "idx_trucks_status" ON "trucks"("status");
+CREATE INDEX "idx_trucks_updated_at" ON "trucks"("updated_at" DESC);
+CREATE INDEX "idx_tire_pressures_truck_recorded" ON "tire_pressures"("truck_id", "recorded_at" DESC);
+CREATE INDEX "idx_location_history_truck_time" ON "location_history"("truck_id", "recorded_at" DESC);
+CREATE INDEX "idx_location_history_recorded_at" ON "location_history"("recorded_at" DESC);
+CREATE INDEX "idx_truck_alerts_truck_resolved" ON "truck_alerts"("truck_id", "is_resolved");
+CREATE INDEX "idx_truck_alerts_created_at" ON "truck_alerts"("created_at" DESC);
+CREATE INDEX "idx_maintenance_truck_date" ON "maintenance_records"("truck_id", "start_date" DESC);
+
+-- Create spatial indexes
+CREATE INDEX "idx_mining_zones_boundary" ON "mining_zones" USING GIST ("boundary");
+
+-- Create foreign key constraints
+ALTER TABLE "trucks" ADD CONSTRAINT "trucks_model_id_fkey" FOREIGN KEY ("model_id") REFERENCES "truck_models"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "tire_pressures" ADD CONSTRAINT "tire_pressures_truck_id_fkey" FOREIGN KEY ("truck_id") REFERENCES "trucks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "location_history" ADD CONSTRAINT "location_history_truck_id_fkey" FOREIGN KEY ("truck_id") REFERENCES "trucks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "truck_alerts" ADD CONSTRAINT "truck_alerts_truck_id_fkey" FOREIGN KEY ("truck_id") REFERENCES "trucks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "maintenance_records" ADD CONSTRAINT "maintenance_records_truck_id_fkey" FOREIGN KEY ("truck_id") REFERENCES "trucks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Add check constraints
+ALTER TABLE "trucks" ADD CONSTRAINT "trucks_status_check" CHECK ("status" IN ('active', 'inactive', 'maintenance'));
+ALTER TABLE "tire_pressures" ADD CONSTRAINT "tire_pressures_status_check" CHECK ("status" IN ('normal', 'low', 'high'));
+ALTER TABLE "truck_alerts" ADD CONSTRAINT "truck_alerts_severity_check" CHECK ("severity" IN ('low', 'medium', 'high', 'critical'));
+
+-- Insert initial truck models
+INSERT INTO "truck_models" ("name", "manufacturer", "capacity_tons", "fuel_tank_capacity", "tire_count") VALUES
+('797F', 'Caterpillar', 400, 4540, 6),
+('980E-4', 'Komatsu', 360, 4000, 6),
+('T284', 'Liebherr', 400, 4730, 6),
+('789D', 'Caterpillar', 195, 2650, 6),
+('830E', 'Komatsu', 220, 3030, 6),
+('777D', 'Caterpillar', 90, 1900, 6),
+('HD785-7', 'Komatsu', 90, 1900, 6),
+('T236', 'Liebherr', 100, 2200, 6);
+
+-- Insert default users
+INSERT INTO "users" ("username", "email", "password_hash", "role") VALUES
+('admin', 'admin@fleet.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin'),
+('operator', 'operator@fleet.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'operator'),
+('supervisor', 'supervisor@fleet.com', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'supervisor');
+
+-- Insert PT INDOBARA mining zones
+INSERT INTO "mining_zones" ("name", "zone_type", "boundary", "is_active") VALUES
+(
+    'PT INDOBARA Main Mining Area',
+    'extraction',
+    ST_GeomFromText('POLYGON((
+        115.604399949931505 -3.545400075547209,
+        115.604399841131098 -3.608799574004828,
+        115.649400029697503 -3.608799509217319,
+        115.649400017089704 -3.663100293456181,
+        115.617400059975793 -3.663099780174879,
+        115.617399737213503 -3.685699156803738,
+        115.649299960676103 -3.685699068800897,
+        115.649300362663595 -3.699299673460462,
+        115.617800049745696 -3.699300020057011,
+        115.6177999530113 -3.717199908413447,
+        115.658299919322602 -3.717200000114277,
+        115.6582955763173 -3.473005894715275,
+        115.568699602091598 -3.473001685807625,
+        115.568700182646694 -3.464001541662113,
+        115.555099828419003 -3.463999391784724,
+        115.555099291465098 -3.473003271644793,
+        115.532700208403895 -3.473001476768178,
+        115.532699846387402 -3.463900605411753,
+        115.550701359743002 -3.463902395098822,
+        115.5507013482556 -3.454898213912309,
+        115.568701230550005 -3.454902873855015,
+        115.568700726908006 -3.445900276606981,
+        115.577700266719404 -3.445900134950424,
+        115.577700019488205 -3.431898966201222,
+        115.559699638559096 -3.431899648314737,
+        115.559699554334102 -3.437400397522957,
+        115.550100512253806 -3.437398099998878,
+        115.550099020797404 -3.450002211390146,
+        115.532703272530895 -3.449999179807085,
+        115.532700637088993 -3.454899270607867,
+        115.523702194253303 -3.454899042442723,
+        115.523699255391406 -3.463901335023041,
+        115.517901076646893 -3.463899658740474,
+        115.517900197349306 -3.467902281514015,
+        115.514600138263603 -3.467902292826565,
+        115.514601072048507 -3.50010155304351,
+        115.496599227790597 -3.50009900533689,
+        115.496599869340898 -3.518100005601176,
+        115.466797471563495 -3.518103740087548,
+        115.466801168336701 -3.550206921843847,
+        115.442500430814604 -3.550203582815326,
+        115.442497952207603 -3.563204681010987,
+        115.432199323066001 -3.563200126588743,
+        115.432199985374197 -3.575400350745974,
+        115.4738011947736 -3.575400021250577,
+        115.473797766754501 -3.667299052802766,
+        115.478300326726696 -3.667298846101514,
+        115.478299650158803 -3.699001512244875,
+        115.473698702561805 -3.698999777578339,
+        115.473698840205799 -3.706300548298581,
+        115.481699037262302 -3.706400782574116,
+        115.4817010345688 -3.717102490691376,
+        115.505201004278504 -3.717098288779876,
+        115.505299006694997 -3.635700209735227,
+        115.487399266748895 -3.635701682784649,
+        115.487397660302193 -3.545299693708786,
+        115.5010009898878 -3.545299520128636,
+        115.500999334020705 -3.536300365773843,
+        115.514602134835499 -3.536297749737575,
+        115.514599616947706 -3.518200242642467,
+        115.532599668902606 -3.518200602467881,
+        115.532599481961398 -3.509199349853453,
+        115.541641655013905 -3.509228095023962,
+        115.541599827827795 -3.500200339853857,
+        115.577599166446404 -3.500199675893057,
+        115.577599706645202 -3.509299212907206,
+        115.604599070000702 -3.509301495077436,
+        115.604600094546797 -3.518300046458291,
+        115.613499987067996 -3.518300064005411,
+        115.613499543131596 -3.54540116002996,
+        115.604399949931505 -3.545400075547209
+    ))', 4326),
+    true
+),
+(
+    'PT INDOBARA Processing Area',
+    'processing',
+    ST_GeomFromText('POLYGON((
+        115.55 -3.65,
+        115.60 -3.65,
+        115.60 -3.60,
+        115.55 -3.60,
+        115.55 -3.65
+    ))', 4326),
+    true
+),
+(
+    'PT INDOBARA Maintenance Area',
+    'maintenance',
+    ST_GeomFromText('POLYGON((
+        115.62 -3.52,
+        115.65 -3.52,
+        115.65 -3.50,
+        115.62 -3.50,
+        115.62 -3.52
+    ))', 4326),
+    true
+),
+(
+    'PT INDOBARA Waste Dump',
+    'disposal',
+    ST_GeomFromText('POLYGON((
+        115.48 -3.70,
+        115.52 -3.70,
+        115.52 -3.68,
+        115.48 -3.68,
+        115.48 -3.70
+    ))', 4326),
+    true
+),
+(
+    'PT INDOBARA Coal Stockpile',
+    'storage',
+    ST_GeomFromText('POLYGON((
+        115.58 -3.55,
+        115.62 -3.55,
+        115.62 -3.53,
+        115.58 -3.53,
+        115.58 -3.55
+    ))', 4326),
+    true
+);
+
+-- Create utility functions
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$ language 'plpgsql';
+
+-- Create triggers for auto-updating timestamps
+CREATE TRIGGER update_trucks_updated_at 
+    BEFORE UPDATE ON trucks
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_users_updated_at 
+    BEFORE UPDATE ON users
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Create useful views for reporting
+CREATE VIEW truck_summary AS
+SELECT 
+    t.id,
+    t.truck_number,
+    tm.name as model_name,
+    tm.manufacturer,
+    t.status,
+    t.longitude,
+    t.latitude,
+    t.speed,
+    t.heading,
+    t.fuel_percentage,
+    t.payload_tons,
+    t.driver_name,
+    t.engine_hours,
+    t.odometer,
+    t.last_maintenance,
+    t.updated_at as last_update,
+    (SELECT COUNT(*) FROM truck_alerts ta WHERE ta.truck_id = t.id AND ta.is_resolved = false) as active_alerts_count
+FROM trucks t
+LEFT JOIN truck_models tm ON t.model_id = tm.id;
+
+CREATE VIEW tire_pressure_summary AS
+SELECT 
+    tp.truck_id,
+    t.truck_number,
+    COUNT(*) as total_tires,
+    COUNT(CASE WHEN tp.status = 'normal' THEN 1 END) as normal_tires,
+    COUNT(CASE WHEN tp.status = 'low' THEN 1 END) as low_pressure_tires,
+    COUNT(CASE WHEN tp.status = 'high' THEN 1 END) as high_pressure_tires,
+    AVG(tp.pressure_psi) as avg_pressure,
+    MIN(tp.pressure_psi) as min_pressure,
+    MAX(tp.pressure_psi) as max_pressure,
+    MAX(tp.recorded_at) as last_reading
+FROM tire_pressures tp
+JOIN trucks t ON tp.truck_id = t.id
+GROUP BY tp.truck_id, t.truck_number;
+
+CREATE VIEW dashboard_stats AS
+SELECT 
+    COUNT(*) as total_trucks,
+    COUNT(CASE WHEN status = 'active' THEN 1 END) as active_trucks,
+    COUNT(CASE WHEN status = 'inactive' THEN 1 END) as inactive_trucks,
+    COUNT(CASE WHEN status = 'maintenance' THEN 1 END) as maintenance_trucks,
+    AVG(fuel_percentage) as avg_fuel,
+    SUM(payload_tons) as total_payload,
+    (SELECT COUNT(*) FROM truck_alerts WHERE is_resolved = false) as total_alerts
+FROM trucks;
