@@ -123,16 +123,13 @@ const getAlertSummary = async (req, res) => {
             gte: since
           }
         },
-        _count: {
-          _all: true
-        },
+        _count: true,
         orderBy: {
           _count: {
-            _all: 'desc'
+            alertType: 'desc'
           }
-        },
-        take: 5
-      })
+        }
+      }).then(results => results.slice(0, 5))
     ]);
 
     // Format severity breakdown
@@ -144,7 +141,8 @@ const getAlertSummary = async (req, res) => {
     };
 
     severityBreakdown.forEach(item => {
-      severityMap[item.severity] = item._count._all;
+      const severity = item.severity.toLowerCase();
+      severityMap[severity] = item._count._all;
     });
 
     res.status(200).json({
@@ -155,7 +153,7 @@ const getAlertSummary = async (req, res) => {
         severityBreakdown: severityMap,
         topAlertTypes: topAlertTypes.map(item => ({
           type: item.alertType,
-          count: item._count._all
+          count: item._count.alertType
         })),
         generatedAt: new Date().toISOString()
       },

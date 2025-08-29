@@ -4,8 +4,9 @@
 
 This documentation provides comprehensive information for frontend developers to integrate with the Fleet Management backend system. The API includes both REST endpoints and WebSocket real-time communication.
 
-**Base URL**: `http://localhost:3001`  
-**WebSocket URL**: `ws://localhost:3001/ws`
+**Base URL**: `http://localhost:3001` or `http://192.168.21.14:3001`  
+**WebSocket URL**: `ws://localhost:3001/ws` or `ws://192.168.21.14:3001/ws`  
+**Environment**: Development (CORS enabled for all origins)
 
 ---
 
@@ -42,6 +43,8 @@ Include the JWT token in all authenticated requests:
 ```
 Authorization: Bearer <your-jwt-token>
 ```
+
+**⚠️ Important**: All API endpoints except `/api/auth/login` require JWT authentication.
 
 ---
 
@@ -254,7 +257,13 @@ Authorization: Bearer <your-jwt-token>
 ## 🔌 WebSocket Real-time API
 
 ### Connection
-Connect to: `ws://localhost:3001/ws`
+Connect to: `ws://localhost:3001/ws` or `ws://192.168.21.14:3001/ws`
+
+**Available Channels:**
+- `truck_updates`: Real-time truck locations (GeoJSON format)
+- `alerts`: New alerts and alert updates  
+- `dashboard`: Dashboard statistics updates
+- `admin_activities`: Admin activity monitoring
 
 ### Message Format
 All WebSocket messages use JSON format:
@@ -273,12 +282,12 @@ All WebSocket messages use JSON format:
 ```json
 {
   "type": "subscribe",
-  "data": {
-    "channel": "truck_updates"
-  },
+  "channel": "truck_updates",
   "requestId": "sub-001"
 }
 ```
+
+**Note**: Use `channel` property directly, not nested in `data`.
 
 **Available Channels:**
 - `truck_updates`: Real-time truck location and status updates
@@ -289,9 +298,7 @@ All WebSocket messages use JSON format:
 ```json
 {
   "type": "unsubscribe",
-  "data": {
-    "channel": "truck_updates"
-  },
+  "channel": "truck_updates",
   "requestId": "unsub-001"
 }
 ```
@@ -352,23 +359,31 @@ All WebSocket messages use JSON format:
 }
 ```
 
-#### 3. Truck Location Updates
+#### 3. Truck Location Updates (GeoJSON Format)
 ```json
 {
-  "type": "truck_locations_update",
-  "data": [
-    {
-      "truckId": 1,
-      "truckNumber": "T001",
-      "latitude": -6.2088,
-      "longitude": 106.8456,
-      "status": "active",
-      "fuel": 85.5,
-      "speed": 45.2,
-      "heading": 180
-    }
-  ],
-  "timestamp": "2025-08-28T08:15:30Z"
+  "type": "truck_locations",
+  "data": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "id": 1,
+          "truckNumber": "T001",
+          "status": "active",
+          "speed": 45.2,
+          "fuelPercentage": 85.5,
+          "driverName": "John Doe"
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [106.8456, -6.2088]
+        }
+      }
+    ]
+  },
+  "timestamp": "2025-08-29T03:13:15Z"
 }
 ```
 
@@ -463,7 +478,7 @@ class FleetWebSocketClient {
     if (this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'subscribe',
-        data: { channel },
+        channel: channel,
         requestId: `sub-${Date.now()}`
       }));
       this.subscriptions.add(channel);
@@ -472,14 +487,17 @@ class FleetWebSocketClient {
 
   handleMessage(message) {
     switch (message.type) {
-      case 'truck_locations_update':
+      case 'truck_locations':
         this.onTruckLocationUpdate(message.data);
         break;
-      case 'new_alerts':
+      case 'alert_update':
         this.onNewAlerts(message.data);
         break;
       case 'dashboard_update':
         this.onDashboardUpdate(message.data);
+        break;
+      case 'subscription_ack':
+        console.log('Subscribed to:', message.data?.channel);
         break;
     }
   }
@@ -529,7 +547,7 @@ export const useFleetWebSocket = (url, token) => {
       // Subscribe to channels
       ws.current.send(JSON.stringify({
         type: 'subscribe',
-        data: { channel: 'truck_updates' },
+        channel: 'truck_updates',
         requestId: 'sub-trucks'
       }));
     };
@@ -537,9 +555,11 @@ export const useFleetWebSocket = (url, token) => {
     ws.current.onmessage = (event) => {
       const message = JSON.parse(event.data);
       
-      if (message.type === 'truck_locations_update') {
-        setTrucks(message.data);
-      } else if (message.type === 'new_alerts') {
+      if (message.type === 'truck_locations') {
+        // Handle GeoJSON format
+        const truckFeatures = message.data.features || [];
+        setTrucks(truckFeatures);
+      } else if (message.type === 'alert_update') {
         setAlerts(prev => [...prev, ...message.data]);
       }
     };
@@ -621,4 +641,46 @@ For technical support or questions about the API, please refer to:
 
 ---
 
-*Last updated: 2025-08-28*
+## 🌐 Network Configuration
+
+### Multi-IP Access
+- **Local Development**: `http://localhost:3001`
+- **Network Access**: `http://192.168.21.14:3001` (replace with your server IP)
+- **CORS**: Enabled for all origins (`*`) in development
+- **Server Binding**: `0.0.0.0:3001` (accessible from any network interface)
+
+### Environment Variables for Frontend
+```javascript
+// Development
+const API_BASE_URL = 'http://localhost:3001/api';
+const WS_URL = 'ws://localhost:3001/ws';
+
+// Network deployment
+const API_BASE_URL = 'http://192.168.21.14:3001/api';
+const WS_URL = 'ws://192.168.21.14:3001/ws';
+```
+
+---
+
+## 🧪 Quick Testing
+
+### Test Login
+```bash
+curl -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}'
+```
+
+### Test WebSocket (Browser Console)
+```javascript
+const ws = new WebSocket('ws://localhost:3001/ws');
+ws.onopen = () => {
+  console.log('Connected!');
+  ws.send(JSON.stringify({type: 'subscribe', channel: 'truck_updates'}));
+};
+ws.onmessage = (e) => console.log('Received:', JSON.parse(e.data));
+```
+
+---
+
+*Last updated: 2025-08-29 - Backend fully operational with 1000 trucks, real-time WebSocket, and multi-IP access*

@@ -2,6 +2,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 const pool = require('../config/database');
+const { logAdminActivity, logAdminOperation, logSecurityEvent } = require('../utils/adminLogger');
+const { broadcastAdminActivity } = require('../services/websocketService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fleet-management-secret-key-change-in-production';
 
@@ -28,6 +30,14 @@ const login = async (req, res) => {
     const result = await pool.query(userQuery, [username]);
 
     if (result.rows.length === 0) {
+      // Log failed login attempt
+      logSecurityEvent('FAILED_LOGIN_ATTEMPT', {
+        username,
+        ip: req.ip || req.connection.remoteAddress,
+        userAgent: req.get('User-Agent'),
+        reason: 'User not found'
+      });
+      
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -40,6 +50,15 @@ const login = async (req, res) => {
     const isValidPassword = password === 'admin123' || await bcrypt.compare(password, user.password_hash);
 
     if (!isValidPassword) {
+      // Log failed login attempt - wrong password
+      logSecurityEvent('FAILED_LOGIN_ATTEMPT', {
+        username: user.username,
+        userId: user.id,
+        ip: req.ip || req.connection.remoteAddress,
+        userAgent: req.get('User-Agent'),
+        reason: 'Invalid password'
+      });
+      
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -62,6 +81,46 @@ const login = async (req, res) => {
       'UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE id = $1',
       [user.id]
     );
+
+    // Log successful admin login
+    logAdminOperation('USER_LOGIN', user.id, {
+      username: user.username,
+      role: user.role,
+      ip: req.ip || req.connection.remoteAddress,
+      userAgent: req.get('User-Agent'),
+      loginTime: new Date().toISOString(),
+      sessionDuration: '24h'
+    });
+
+    // Log admin activity for real-time monitoring
+    const adminActivityData = {
+      adminId: user.id,
+      adminUsername: user.username,
+      adminRole: user.role,
+      clientIp: req.ip || req.connection.remoteAddress,
+      userAgent: req.get('User-Agent'),
+      loginMethod: 'web_frontend',
+      tokenExpiry: '24h'
+    };
+
+    logAdminActivity('ADMIN_LOGIN_SUCCESS', adminActivityData);
+
+    // Broadcast admin login activity via WebSocket for real-time monitoring
+    broadcastAdminActivity({
+      type: 'admin_login',
+      action: 'ADMIN_LOGIN_SUCCESS',
+      admin: {
+        id: user.id,
+        username: user.username,
+        role: user.role
+      },
+      details: {
+        ip: req.ip || req.connection.remoteAddress,
+        userAgent: req.get('User-Agent'),
+        loginTime: new Date().toISOString(),
+        method: 'web_frontend'
+      }
+    });
 
     res.json({
       success: true,

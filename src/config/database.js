@@ -10,7 +10,9 @@ const pool = new Pool({
   port: process.env.DB_PORT || 5432,
   max: 20, // maximum number of clients in the pool
   idleTimeoutMillis: 30000, // how long a client is allowed to remain idle
-  connectionTimeoutMillis: 2000, // how long to wait when connecting a client
+  connectionTimeoutMillis: 10000, // increased timeout to 10 seconds
+  acquireTimeoutMillis: 60000, // how long to wait for a connection from pool
+  createTimeoutMillis: 30000, // how long to wait when creating a connection
 });
 
 // Test connection on startup

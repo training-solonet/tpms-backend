@@ -3,8 +3,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const routes = require('./routes');
-const { errorHandler, notFoundHandler } = require('./middlewares/errorHandler');
-const { requestLogger } = require('./middlewares/logger');
+const errorHandler = require('./middleware/errorhandler');
+const { requestLogger } = require('./middleware/logger');
 
 const app = express();
 
@@ -62,7 +62,13 @@ app.get('/', (req, res) => {
 app.use('/api', routes);
 
 // 404 handler
-app.use('*', notFoundHandler);
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Endpoint not found',
+    path: req.originalUrl
+  });
+});
 
 // Error handling middleware
 app.use(errorHandler);

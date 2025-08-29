@@ -5,7 +5,8 @@ let clients = new Map();
 let subscriptions = {
   truckUpdates: new Set(),
   alerts: new Set(),
-  dashboard: new Set()
+  dashboard: new Set(),
+  adminActivities: new Set()
 };
 
 const initialize = (webSocketServer) => {
@@ -89,11 +90,25 @@ const getConnectedClients = () => {
   return clients.size;
 };
 
+const broadcastAdminActivity = (activity) => {
+  if (!wsServer) {
+    console.warn('WebSocket server not initialized');
+    return;
+  }
+
+  broadcastToSubscription(subscriptions.adminActivities, {
+    type: 'admin_activity',
+    data: activity,
+    timestamp: new Date().toISOString()
+  });
+};
+
 const getSubscriptions = () => {
   return {
     truckUpdates: subscriptions.truckUpdates.size,
     alerts: subscriptions.alerts.size,
-    dashboard: subscriptions.dashboard.size
+    dashboard: subscriptions.dashboard.size,
+    adminActivities: subscriptions.adminActivities.size
   };
 };
 
@@ -107,6 +122,7 @@ const removeClient = (clientId) => {
   subscriptions.truckUpdates.delete(clientId);
   subscriptions.alerts.delete(clientId);
   subscriptions.dashboard.delete(clientId);
+  subscriptions.adminActivities.delete(clientId);
   
   // Remove client
   clients.delete(clientId);
@@ -123,6 +139,9 @@ const addSubscription = (clientId, channel) => {
     case 'dashboard':
       subscriptions.dashboard.add(clientId);
       break;
+    case 'admin_activities':
+      subscriptions.adminActivities.add(clientId);
+      break;
   }
 };
 
@@ -137,6 +156,9 @@ const removeSubscription = (clientId, channel) => {
     case 'dashboard':
       subscriptions.dashboard.delete(clientId);
       break;
+    case 'admin_activities':
+      subscriptions.adminActivities.delete(clientId);
+      break;
   }
 };
 
@@ -146,6 +168,7 @@ module.exports = {
   broadcastTruckStatusUpdate,
   broadcastNewAlert,
   broadcastAlertResolved,
+  broadcastAdminActivity,
   getConnectedClients,
   getSubscriptions,
   addClient,
