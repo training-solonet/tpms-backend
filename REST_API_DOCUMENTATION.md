@@ -678,15 +678,14 @@ All WebSocket messages use JSON format:
 - `truck_updates`: Real-time truck location and status updates
 - `alerts`: New alerts and alert resolutions
 - `dashboard`: Dashboard statistics updates
-- `admin_activities`: Admin login and activity notifications
+- `admin_activities`: Admin login and activity monitoring
 
 ### Subscribe to Channel
 ```json
 {
   "type": "subscribe",
-  "data": {
-    "channel": "truck_updates"
-  }
+  "channel": "truck_updates",
+  "requestId": "unique-request-id"
 }
 ```
 
@@ -695,31 +694,44 @@ All WebSocket messages use JSON format:
 ```json
 {
   "type": "truck_locations_update",
-  "data": [
-    {
-      "truckId": 1,
-      "truckNumber": "T001",
-      "latitude": -6.2088,
-      "longitude": 106.8456,
-      "speed": 25.5,
-      "heading": 180
-    }
-  ],
+  "data": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "properties": {
+          "id": 1,
+          "truckNumber": "T001",
+          "status": "ACTIVE",
+          "speed": 25.5,
+          "fuelPercentage": 78.2,
+          "heading": 180
+        },
+        "geometry": {
+          "type": "Point",
+          "coordinates": [106.8456, -6.2088]
+        }
+      }
+    ]
+  },
   "timestamp": "2025-08-29T02:11:50.000Z"
 }
 ```
 
-#### New Alert
+#### New Alerts
 ```json
 {
-  "type": "new_alert",
-  "data": {
-    "id": 1,
-    "type": "TIRE_PRESSURE",
-    "severity": "HIGH",
-    "message": "Low tire pressure detected",
-    "truckNumber": "T001"
-  },
+  "type": "new_alerts",
+  "data": [
+    {
+      "id": 1,
+      "type": "TIRE_PRESSURE",
+      "severity": "HIGH",
+      "message": "Low tire pressure detected",
+      "truckNumber": "T001",
+      "createdAt": "2025-08-29T02:11:50.000Z"
+    }
+  ],
   "timestamp": "2025-08-29T02:11:50.000Z"
 }
 ```

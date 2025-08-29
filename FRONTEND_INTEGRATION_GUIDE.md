@@ -147,7 +147,7 @@ ws.send(JSON.stringify(subscribeMessage));
 #### Real-Time Truck Updates
 ```javascript
 {
-  "type": "truck_locations",
+  "type": "truck_locations_update",
   "data": {
     "type": "FeatureCollection",
     "features": [
@@ -156,10 +156,10 @@ ws.send(JSON.stringify(subscribeMessage));
         "properties": {
           "id": 1,
           "truckNumber": "T001",
-          "status": "active",
+          "status": "ACTIVE",
           "speed": 45.5,
           "fuelPercentage": 78.2,
-          "driverName": "John Doe"
+          "heading": 180
         },
         "geometry": {
           "type": "Point",
@@ -278,13 +278,25 @@ class FleetWebSocket {
     const { type, data } = message;
     
     switch (type) {
-      case 'truck_locations':
+      case 'truck_locations_update':
         const callback = this.subscribers.get('truck_updates');
         if (callback) callback(data);
         break;
-      case 'alert_update':
+      case 'new_alerts':
         const alertCallback = this.subscribers.get('alerts');
         if (alertCallback) alertCallback(data);
+        break;
+      case 'alert_resolved':
+        const resolvedCallback = this.subscribers.get('alerts');
+        if (resolvedCallback) resolvedCallback(data);
+        break;
+      case 'dashboard_update':
+        const dashCallback = this.subscribers.get('dashboard');
+        if (dashCallback) dashCallback(data);
+        break;
+      case 'admin_activity':
+        const adminCallback = this.subscribers.get('admin_activities');
+        if (adminCallback) adminCallback(data);
         break;
       // Handle other message types...
     }
@@ -364,16 +376,20 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));
 {
   "id": 1,
   "truckNumber": "T001",
-  "status": "active",
-  "latitude": -6.2088,
-  "longitude": 106.8456,
+  "status": "ACTIVE",
+  "model": "CAT 797F",
+  "currentLocation": {
+    "latitude": -6.2088,
+    "longitude": 106.8456,
+    "zone": "Zone A",
+    "timestamp": "2025-08-29T03:13:15Z"
+  },
   "speed": 45.5,
   "heading": 180,
   "fuelPercentage": 78.2,
   "payloadTons": 25.5,
   "driverName": "John Doe",
   "engineHours": 8500,
-  "lastMaintenance": "2025-01-15T10:30:00Z",
   "updatedAt": "2025-08-29T03:13:15Z"
 }
 ```
@@ -384,10 +400,11 @@ ws.onmessage = (e) => console.log(JSON.parse(e.data));
   "id": 1,
   "truckId": 1,
   "alertType": "Low Fuel",
-  "severity": "high",
+  "severity": "HIGH",
   "message": "Fuel level below 20%",
   "isResolved": false,
-  "createdAt": "2025-08-29T03:13:15Z"
+  "createdAt": "2025-08-29T03:13:15Z",
+  "resolvedAt": null
 }
 ```
 

@@ -260,10 +260,10 @@ Authorization: Bearer <your-jwt-token>
 Connect to: `ws://localhost:3001/ws` or `ws://192.168.21.14:3001/ws`
 
 **Available Channels:**
-- `truck_updates`: Real-time truck locations (GeoJSON format)
-- `alerts`: New alerts and alert updates  
+- `truck_updates`: Real-time truck locations and status updates
+- `alerts`: New alerts and alert resolutions  
 - `dashboard`: Dashboard statistics updates
-- `admin_activities`: Admin activity monitoring
+- `admin_activities`: Admin login and activity monitoring
 
 ### Message Format
 All WebSocket messages use JSON format:
@@ -284,10 +284,11 @@ All WebSocket messages use JSON format:
   "type": "subscribe",
   "channel": "truck_updates",
   "requestId": "sub-001"
+{{ ... }}
 }
 ```
 
-**Note**: Use `channel` property directly, not nested in `data`.
+**Note**: Use `channel` property directly at root level, not nested in `data`.
 
 **Available Channels:**
 - `truck_updates`: Real-time truck location and status updates
@@ -362,7 +363,7 @@ All WebSocket messages use JSON format:
 #### 3. Truck Location Updates (GeoJSON Format)
 ```json
 {
-  "type": "truck_locations",
+  "type": "truck_locations_update",
   "data": {
     "type": "FeatureCollection",
     "features": [
@@ -371,10 +372,10 @@ All WebSocket messages use JSON format:
         "properties": {
           "id": 1,
           "truckNumber": "T001",
-          "status": "active",
+          "status": "ACTIVE",
           "speed": 45.2,
           "fuelPercentage": 85.5,
-          "driverName": "John Doe"
+          "heading": 180
         },
         "geometry": {
           "type": "Point",
@@ -394,8 +395,8 @@ All WebSocket messages use JSON format:
   "data": [
     {
       "id": 123,
-      "type": "low_fuel",
-      "severity": "medium",
+      "type": "Low Fuel",
+      "severity": "HIGH",
       "message": "Fuel level below 20%",
       "truckNumber": "T001",
       "createdAt": "2025-08-28T08:15:30Z"
@@ -411,22 +412,35 @@ All WebSocket messages use JSON format:
   "type": "dashboard_update",
   "data": {
     "fleet": {
-      "total": 100,
-      "active": 85,
-      "inactive": 15
+      "total": 1000,
+      "active": 850,
+      "inactive": 150
     },
     "alerts": {
-      "unresolved": 12
+      "unresolved": 25
     },
     "maintenance": {
-      "recentCount": 3
+      "recentCount": 15
     }
   },
-  "timestamp": "2025-08-28T08:15:30Z"
+  "timestamp": "2025-08-29T06:47:05Z"
 }
 ```
 
-#### 6. Error Messages
+#### 6. Alert Resolved
+```json
+{
+  "type": "alert_resolved",
+  "data": {
+    "id": 123,
+    "isResolved": true,
+    "resolvedAt": "2025-08-29T06:47:05Z"
+  },
+  "timestamp": "2025-08-29T06:47:05Z"
+}
+```
+
+#### 7. Error Messages
 ```json
 {
   "type": "error",
@@ -487,11 +501,14 @@ class FleetWebSocketClient {
 
   handleMessage(message) {
     switch (message.type) {
-      case 'truck_locations':
+      case 'truck_locations_update':
         this.onTruckLocationUpdate(message.data);
         break;
-      case 'alert_update':
+      case 'new_alerts':
         this.onNewAlerts(message.data);
+        break;
+      case 'alert_resolved':
+        this.onAlertResolved(message.data);
         break;
       case 'dashboard_update':
         this.onDashboardUpdate(message.data);
@@ -555,12 +572,14 @@ export const useFleetWebSocket = (url, token) => {
     ws.current.onmessage = (event) => {
       const message = JSON.parse(event.data);
       
-      if (message.type === 'truck_locations') {
+      if (message.type === 'truck_locations_update') {
         // Handle GeoJSON format
         const truckFeatures = message.data.features || [];
         setTrucks(truckFeatures);
-      } else if (message.type === 'alert_update') {
+      } else if (message.type === 'new_alerts') {
         setAlerts(prev => [...prev, ...message.data]);
+      } else if (message.type === 'alert_resolved') {
+        setAlerts(prev => prev.filter(alert => alert.id !== message.data.id));
       }
     };
     
