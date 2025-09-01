@@ -1,5 +1,5 @@
 const pool = require('../config/database');
-const { broadcastTruckUpdate } = require('./websocketservice');
+const { broadcastTruckUpdate } = require('./websocketService');
 
 const startRealTimeSimulation = (io) => {
   setInterval(async () => {
