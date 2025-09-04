@@ -479,22 +479,22 @@ class WebSocketServer {
       if (!this.isReady || this.subscriptions.alerts.size === 0) return;
 
       try {
-        const recentAlerts = await prismaService.prisma.truckAlert.findMany({
+        const recentAlerts = await prismaService.prisma.alertEvent.findMany({
           where: {
-            isResolved: false,
-            createdAt: {
+            acknowledged: false,
+            occurredAt: {
               gte: new Date(Date.now() - 60000) // Last minute
             }
           },
           include: {
             truck: {
               select: {
-                truckNumber: true
+                plateNumber: true
               }
             }
           },
           orderBy: {
-            createdAt: 'desc'
+            occurredAt: 'desc'
           }
         });
 
@@ -503,11 +503,11 @@ class WebSocketServer {
             type: 'new_alerts',
             data: recentAlerts.map(alert => ({
               id: alert.id,
-              type: alert.alertType,
+              type: alert.type,
               severity: alert.severity,
-              message: alert.message,
-              truckNumber: alert.truck.truckNumber,
-              createdAt: alert.createdAt
+              detail: alert.detail,
+              plateNumber: alert.truck.plateNumber,
+              occurredAt: alert.occurredAt
             })),
             timestamp: new Date().toISOString()
           });
@@ -598,10 +598,16 @@ class WebSocketServer {
     ] = await Promise.all([
       prismaService.prisma.truck.count(),
       prismaService.prisma.truck.count({
-        where: { status: 'ACTIVE' }
+        where: {
+          truckStatusEvents: {
+            some: {
+              status: 'active'
+            }
+          }
+        }
       }),
-      prismaService.prisma.truckAlert.count({
-        where: { isResolved: false }
+      prismaService.prisma.alertEvent.count({
+        where: { acknowledged: false }
       }),
       // Skip maintenance records if table doesn't exist
       0
@@ -625,17 +631,17 @@ class WebSocketServer {
   async getUnresolvedAlerts() {
     if (!this.isReady) throw new Error('Database not ready');
 
-    return await prismaService.prisma.truckAlert.findMany({
-      where: { isResolved: false },
+    return await prismaService.prisma.alertEvent.findMany({
+      where: { acknowledged: false },
       include: {
         truck: {
           select: {
-            truckNumber: true
+            plateNumber: true
           }
         }
       },
       orderBy: {
-        createdAt: 'desc'
+        occurredAt: 'desc'
       }
     });
   }
@@ -652,11 +658,10 @@ class WebSocketServer {
   async resolveAlert(alertId) {
     if (!this.isReady) throw new Error('Database not ready');
 
-    return await prismaService.prisma.truckAlert.update({
+    return await prismaService.prisma.alertEvent.update({
       where: { id: alertId },
       data: {
-        isResolved: true,
-        resolvedAt: new Date()
+        acknowledged: true
       }
     });
   }

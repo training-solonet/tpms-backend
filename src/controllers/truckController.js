@@ -439,9 +439,128 @@ const bulkUpdateTruckStatus = async (req, res) => {
   }
 };
 
-// ==========================================
-// EXPORT FUNCTIONS
-// ==========================================
+// New function for getting truck locations by plate number
+const getTruckLocationsByPlate = async (req, res) => {
+  try {
+    const plateNumber = decodeURIComponent(req.params.plateNumber);
+    const { timeRange = '24h', limit = 200, minSpeed = 0 } = req.query;
+    
+    console.log(`Getting location history for truck: ${plateNumber}`);
+    
+    // Parse time range
+    let hoursBack = 24;
+    if (timeRange.endsWith('h')) {
+      hoursBack = parseInt(timeRange.replace('h', '')) || 24;
+    } else if (timeRange.endsWith('d')) {
+      hoursBack = (parseInt(timeRange.replace('d', '')) || 1) * 24;
+    }
+    
+    // Calculate time range
+    const since = new Date();
+    since.setHours(since.getHours() - hoursBack);
+    
+    // First, find the truck by plate number
+    const truck = await prismaService.prisma.$queryRaw`
+      SELECT id, plate_number, model FROM truck 
+      WHERE plate_number = ${plateNumber}
+      LIMIT 1
+    `;
+    
+    if (truck.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `Truck with plate number '${plateNumber}' not found`
+      });
+    }
+    
+    const truckId = truck[0].id;
+    
+    // Get GPS positions for this truck
+    const gpsPositions = await prismaService.prisma.$queryRaw`
+      SELECT 
+        id,
+        truck_id,
+        ts,
+        ST_X(pos::geometry) as longitude,
+        ST_Y(pos::geometry) as latitude,
+        speed_kph,
+        heading_deg,
+        hdop,
+        source
+      FROM gps_position 
+      WHERE truck_id = ${truckId}::uuid
+        AND ts >= ${since}::timestamptz
+        AND speed_kph >= ${parseFloat(minSpeed)}
+      ORDER BY ts DESC
+      LIMIT ${parseInt(limit)}
+    `;
+    
+    // Format response (convert BigInt to string)
+    const locations = gpsPositions.map(pos => ({
+      id: pos.id.toString(),
+      latitude: parseFloat(pos.latitude),
+      longitude: parseFloat(pos.longitude),
+      speed: parseFloat(pos.speed_kph) || 0,
+      heading: parseFloat(pos.heading_deg) || 0,
+      hdop: parseFloat(pos.hdop) || 0,
+      timestamp: pos.ts,
+      source: pos.source
+    }));
+    
+    // Create GeoJSON track
+    const coordinates = locations
+      .reverse() // Oldest first for proper line drawing
+      .map(point => [point.longitude, point.latitude]);
+    
+    const geoJsonTrack = {
+      type: "Feature",
+      properties: {
+        plateNumber: plateNumber,
+        truckId: truckId,
+        timeRange: timeRange,
+        totalPoints: coordinates.length,
+        minSpeed: minSpeed
+      },
+      geometry: {
+        type: "LineString",
+        coordinates: coordinates
+      }
+    };
+    
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    
+    res.status(200).json({
+      success: true,
+      data: locations, // Frontend expects data to be the array directly
+      truck: {
+        id: truckId,
+        plateNumber: plateNumber,
+        model: truck[0].model
+      },
+      track: geoJsonTrack,
+      summary: {
+        totalPoints: locations.length,
+        timeRange: `${hoursBack} hours`,
+        minSpeed: minSpeed,
+        avgSpeed: locations.length > 0 ? 
+          (locations.reduce((sum, loc) => sum + loc.speed, 0) / locations.length).toFixed(1) : 0
+      },
+      message: `Retrieved ${locations.length} location points for truck ${plateNumber} over the last ${hoursBack} hours`
+    });
+    
+  } catch (error) {
+    console.error('Error in getTruckLocationsByPlate:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch truck location history',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
 
 module.exports = {
   getAllTrucks,
@@ -452,5 +571,6 @@ module.exports = {
   getTruckLocationHistory,
   getTruckAlerts,
   resolveAlert,
-  bulkUpdateTruckStatus
+  bulkUpdateTruckStatus,
+  getTruckLocationsByPlate
 };
