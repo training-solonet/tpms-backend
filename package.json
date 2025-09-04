@@ -12,7 +12,6 @@
     "test:coverage": "jest --coverage",
     "test:api": "node scripts/test-api.js",
     "test:load": "node scripts/test-api.js --load-test --users 20 --duration 60",
-    
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
     "prisma:format": "prisma format",
@@ -23,19 +22,17 @@
     "prisma:pull": "prisma db pull",
     "prisma:push": "prisma db push",
     "prisma:seed": "node scripts/prisma-seed.js",
-
+    "seed:comprehensive": "node scripts/comprehensive-seeder.js",
     "seed:history": "node scripts/history-seeder.js",
     "db:setup": "npm run prisma:generate && npm run prisma:migrate && npm run prisma:seed",
     "setup:complete": "./setup-fleet-management.sh",
     "db:seed": "node scripts/seed-data.js",
-    "db:backup": "pg_dump -U postgres -h localhost fleet_management > backup_$(date +%Y%m%d_%H%M%S).sql",
-    "db:restore": "psql -U postgres -h localhost -d fleet_management",
+    "db:backup": "pg_dump -U postgres_tpms -h connectis.my.id dummy_tracking > backup_$(date +%Y%m%d_%H%M%S).sql",
+    "db:restore": "psql -U postgres_tpms -h connectis.my.id -d dummy_tracking",
     "db:migrate": "node scripts/migrate.js",
     "db:optimize": "node scripts/optimize-database.js",
-
     "update-coordinates": "node scripts/update-coordinates.js",
-    "update-schema": "psql -h localhost -U postgres -d fleet_management -f database/update-schema.sql",
-
+    "update-schema": "psql -h connectis.my.id -U postgres_tpms -d dummy_tracking -f database/update-schema.sql",
     "history:generate": "node scripts/history-seeder.js",
     "history:generate:week": "node scripts/history-seeder.js --days 7 --delete true",
     "history:generate:month": "node scripts/history-seeder.js --days 30 --delete true",
@@ -45,7 +42,6 @@
     "history:realtime": "node scripts/history-utilities.js realtime",
     "history:realtime:long": "node scripts/history-utilities.js realtime 240",
     "history:clean": "node -e \"const {PrismaClient} = require('@prisma/client'); const prisma = new PrismaClient(); prisma.locationHistory.deleteMany().then(r => console.log('Deleted', r.count, 'records'",
-
     "lint": "eslint src/ scripts/ --ext .js",
     "lint:fix": "eslint src/ scripts/ --ext .js --fix",
     "format": "prettier --write \"src/**/*.js\" \"scripts/**/*.js\"",
@@ -62,7 +58,9 @@
     "logs": "tail -f logs/app.log",
     "logs:error": "tail -f logs/error.log",
     "benchmark": "node scripts/benchmark.js",
-    "monitor": "node scripts/monitor-performance.js"
+    "monitor": "node scripts/monitor-performance.js",
+    "db:setup:dummy": "node scripts/setup-dummy-tracking-db.js",
+    "db:init:dummy": "npm run db:setup:dummy && npm run prisma:generate"
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",
@@ -79,10 +77,11 @@
     "moment": "^2.29.4",
     "pg": "^8.11.3",
     "rate-limiter-flexible": "^2.4.2",
-    "ws": "^8.14.2",
-    "winston": "^3.11.0"
+    "winston": "^3.11.0",
+    "ws": "^8.14.2"
   },
   "devDependencies": {
+    "@faker-js/faker": "^10.0.0",
     "eslint": "^8.55.0",
     "jest": "^29.7.0",
     "nodemon": "^3.0.2",

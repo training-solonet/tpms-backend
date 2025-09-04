@@ -103,6 +103,32 @@ const broadcastAdminActivity = (activity) => {
   });
 };
 
+const broadcastTruckUpdate = (data) => {
+  if (!wsServer) {
+    console.warn('WebSocket server not initialized');
+    return;
+  }
+
+  broadcastToSubscription(subscriptions.truckUpdates, {
+    type: 'truck_update',
+    data: data,
+    timestamp: new Date().toISOString()
+  });
+};
+
+const broadcastDashboardUpdate = (data) => {
+  if (!wsServer) {
+    console.warn('WebSocket server not initialized');
+    return;
+  }
+
+  broadcastToSubscription(subscriptions.dashboard, {
+    type: 'dashboard_update',
+    data: data,
+    timestamp: new Date().toISOString()
+  });
+};
+
 const getSubscriptions = () => {
   return {
     truckUpdates: subscriptions.truckUpdates.size,
@@ -169,6 +195,8 @@ module.exports = {
   broadcastNewAlert,
   broadcastAlertResolved,
   broadcastAdminActivity,
+  broadcastTruckUpdate,
+  broadcastDashboardUpdate,
   getConnectedClients,
   getSubscriptions,
   addClient,

@@ -1,0 +1,334 @@
+// Fleet Management Prisma Schema - Matches truck_tracking.md exactly
+generator client {
+  provider        = "prisma-client-js"
+  output          = "./generated/client"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis, pgcrypto]
+}
+
+// Fleet grouping
+model FleetGroup {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  site        String?
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy   String?  @map("created_by") @db.Uuid
+  updatedBy   String?  @map("updated_by") @db.Uuid
+
+  // Relations
+  trucks Truck[]
+
+  @@map("fleet_group")
+}
+
+// Main trucks entity
+model Truck {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  plateNumber  String   @unique @map("plate_number")
+  vin          String?  @unique
+  name         String?
+  model        String?
+  year         Int?
+  tireConfig   String?  @map("tire_config")
+  fleetGroupId String?  @map("fleet_group_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdBy    String?  @map("created_by") @db.Uuid
+  updatedBy    String?  @map("updated_by") @db.Uuid
+
+  // Relations
+  fleetGroup           FleetGroup?           @relation(fields: [fleetGroupId], references: [id])
+  devices              Device[]
+  truckStatusEvents    TruckStatusEvent[]
+  gpsPositions         GpsPosition[]
+  trips                Trip[]
+  tirePressureEvents   TirePressureEvent[]
+  hubTemperatureEvents HubTemperatureEvent[]
+  fuelLevelEvents      FuelLevelEvent[]
+  speedEvents          SpeedEvent[]
+  alertEvents          AlertEvent[]
+  deviceStatusEvents   DeviceStatusEvent[]
+  lockEvents           LockEvent[]
+  dailyRoutes          DailyRoute[]
+
+  @@map("truck")
+}
+
+// Device mapping
+model Device {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  truckId     String    @map("truck_id") @db.Uuid
+  sn          String    @unique
+  simNumber   String?   @map("sim_number")
+  installedAt DateTime  @default(now()) @map("installed_at") @db.Timestamptz(3)
+  removedAt   DateTime? @map("removed_at") @db.Timestamptz(3)
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
+
+  // Relations
+  truck                Truck                 @relation(fields: [truckId], references: [id])
+  sensors              Sensor[]
+  gpsPositions         GpsPosition[]
+  tirePressureEvents   TirePressureEvent[]
+  hubTemperatureEvents HubTemperatureEvent[]
+  deviceStatusEvents   DeviceStatusEvent[]
+  lockEvents           LockEvent[]
+
+  @@index([sn], name: "idx_device_sn")
+  @@map("device")
+}
+
+// Sensor mapping
+model Sensor {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId    String    @map("device_id") @db.Uuid
+  type        String // 'tire' or 'hub'
+  positionNo  Int       @map("position_no")
+  sn          String?   @unique
+  installedAt DateTime? @default(now()) @map("installed_at") @db.Timestamptz(3)
+  removedAt   DateTime? @map("removed_at") @db.Timestamptz(3)
+  createdBy   String?   @map("created_by") @db.Uuid
+  updatedBy   String?   @map("updated_by") @db.Uuid
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id])
+
+  @@map("sensor")
+}
+
+// Truck status events
+model TruckStatusEvent {
+  id        String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  truckId   String      @map("truck_id") @db.Uuid
+  status    TruckStatus
+  note      String?
+  changedAt DateTime    @default(now()) @map("changed_at") @db.Timestamptz(3)
+  createdBy String?     @map("created_by") @db.Uuid
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id])
+
+  @@map("truck_status_event")
+}
+
+// Geofence
+model Geofence {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  // Note: area GEOGRAPHY(MULTIPOLYGON, 4326) handled with raw SQL
+  createdBy String?  @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@map("geofence")
+}
+
+// GPS positions (partitioned table)
+model GpsPosition {
+  id         BigInt   @id @default(autoincrement())
+  deviceId   String?  @map("device_id") @db.Uuid
+  truckId    String   @map("truck_id") @db.Uuid
+  ts         DateTime @db.Timestamptz(3)
+  // Note: pos GEOGRAPHY(POINT, 4326) handled with raw SQL
+  speedKph   Float?   @map("speed_kph") @db.Real
+  headingDeg Float?   @map("heading_deg") @db.Real
+  hdop       Float?   @db.Real
+  source     String?
+
+  // Relations
+  device Device? @relation(fields: [deviceId], references: [id])
+  truck  Truck   @relation(fields: [truckId], references: [id])
+
+  @@index([truckId, ts(sort: Desc)], name: "idx_gps_position_truck_ts")
+  @@map("gps_position")
+}
+
+// Trip summary
+model Trip {
+  id      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  truckId String    @map("truck_id") @db.Uuid
+  startTs DateTime  @map("start_ts") @db.Timestamptz(3)
+  endTs   DateTime? @map("end_ts") @db.Timestamptz(3)
+  // Note: startPos and endPos GEOGRAPHY(POINT,4326) handled with raw SQL
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id])
+
+  @@map("trip")
+}
+
+// Tire pressure events
+model TirePressureEvent {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId     String   @map("device_id") @db.Uuid
+  truckId      String   @map("truck_id") @db.Uuid
+  tireNo       Int      @map("tire_no")
+  pressureKpa  Float?   @map("pressure_kpa") @db.Real
+  tempCelsius  Float?   @map("temp_celsius") @db.Real
+  exType       String?  @map("ex_type")
+  batteryLevel Int?     @map("battery_level") @db.SmallInt
+  changedAt    DateTime @default(now()) @map("changed_at") @db.Timestamptz(3)
+  createdBy    String?  @map("created_by") @db.Uuid
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id])
+  truck  Truck  @relation(fields: [truckId], references: [id])
+
+  @@index([truckId, changedAt(sort: Desc)], name: "idx_tire_pressure_event_truck_ts")
+  @@map("tire_pressure_event")
+}
+
+// Tire error lookup
+model TireErrorCode {
+  code        Int     @id
+  description String?
+
+  @@map("tire_error_code")
+}
+
+// Hub temperature
+model HubTemperatureEvent {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId     String   @map("device_id") @db.Uuid
+  truckId      String   @map("truck_id") @db.Uuid
+  hubNo        Int?     @map("hub_no")
+  tempCelsius  Float?   @map("temp_celsius") @db.Real
+  exType       String?  @map("ex_type")
+  batteryLevel Int?     @map("battery_level") @db.SmallInt
+  changedAt    DateTime @default(now()) @map("changed_at") @db.Timestamptz(3)
+  createdBy    String?  @map("created_by") @db.Uuid
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id])
+  truck  Truck  @relation(fields: [truckId], references: [id])
+
+  @@index([truckId, changedAt(sort: Desc)], name: "idx_hub_temperature_event_truck_ts")
+  @@map("hub_temperature_event")
+}
+
+// Fuel level
+model FuelLevelEvent {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  truckId     String   @map("truck_id") @db.Uuid
+  fuelPercent Float?   @map("fuel_percent") @db.Real
+  changedAt   DateTime @map("changed_at") @db.Timestamptz(3)
+  source      String?
+  createdBy   String?  @map("created_by") @db.Uuid
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id])
+
+  @@index([truckId, changedAt(sort: Desc)], name: "idx_fuel_level_event_truck_ts")
+  @@map("fuel_level_event")
+}
+
+// Speed event
+model SpeedEvent {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  truckId   String   @map("truck_id") @db.Uuid
+  speedKph  Float?   @map("speed_kph") @db.Real
+  changedAt DateTime @map("changed_at") @db.Timestamptz(3)
+  source    String?
+  createdBy String?  @map("created_by") @db.Uuid
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id])
+
+  @@index([truckId, changedAt(sort: Desc)], name: "idx_speed_event_truck_ts")
+  @@map("speed_event")
+}
+
+// Alerts
+model AlertEvent {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  truckId      String    @map("truck_id") @db.Uuid
+  type         AlertType
+  severity     Int?      @db.SmallInt
+  detail       Json?     @db.JsonB
+  occurredAt   DateTime  @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  acknowledged Boolean   @default(false)
+  createdBy    String?   @map("created_by") @db.Uuid
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id])
+
+  @@map("alert_event")
+}
+
+// Device status (latest snapshot)
+model DeviceStatusEvent {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId     String   @map("device_id") @db.Uuid
+  truckId      String   @map("truck_id") @db.Uuid
+  hostBat      Int?     @map("host_bat") @db.SmallInt
+  repeater1Bat Int?     @map("repeater1_bat") @db.SmallInt
+  repeater2Bat Int?     @map("repeater2_bat") @db.SmallInt
+  lockState    Int?     @map("lock_state") @db.SmallInt
+  reportedAt   DateTime @default(now()) @map("reported_at") @db.Timestamptz(3)
+  createdBy    String?  @map("created_by") @db.Uuid
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id])
+  truck  Truck  @relation(fields: [truckId], references: [id])
+
+  @@map("device_status_event")
+}
+
+// Lock history
+model LockEvent {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  deviceId   String   @map("device_id") @db.Uuid
+  truckId    String   @map("truck_id") @db.Uuid
+  isLock     Int?     @map("is_lock") @db.SmallInt
+  reportedAt DateTime @default(now()) @map("reported_at") @db.Timestamptz(3)
+  createdBy  String?  @map("created_by") @db.Uuid
+
+  // Relations
+  device Device @relation(fields: [deviceId], references: [id])
+  truck  Truck  @relation(fields: [truckId], references: [id])
+
+  @@map("lock_event")
+}
+
+// Daily routes
+model DailyRoute {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  truckId     String   @map("truck_id") @db.Uuid
+  routeDate   DateTime @map("route_date") @db.Date
+  // Note: geom GEOGRAPHY(LINESTRING, 4326) handled with raw SQL
+  pointCount  Int      @map("point_count")
+  generatedAt DateTime @default(now()) @map("generated_at") @db.Timestamptz(3)
+  createdBy   String?  @map("created_by") @db.Uuid
+
+  // Relations
+  truck Truck @relation(fields: [truckId], references: [id])
+
+  @@unique([truckId, routeDate])
+  @@map("daily_route")
+}
+
+// Enums
+enum TruckStatus {
+  active
+  inactive
+  maintenance
+
+  @@map("truck_status")
+}
+
+enum AlertType {
+  LOW_TIRE
+  SPEEDING
+  IDLE
+  GEOFENCE_IN
+  GEOFENCE_OUT
+  FUEL_DROP
+  HIGH_TEMP
+  DEVICE_LOST
+
+  @@map("alert_type")
+}

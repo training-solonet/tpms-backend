@@ -7,8 +7,9 @@ const app = require('./src/app');
 require('dotenv').config();
 
 // Import services
-const prismaService = require('./src/services/prismaService');
+const prismaService = require('./src/services/simplePrismaService');
 const websocketService = require('./src/services/websocketService');
+const queueProcessingService = require('./src/services/queueProcessingService');
 const {
   logServerStartup,
   logServerShutdown,

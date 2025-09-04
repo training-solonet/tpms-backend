@@ -1,4 +1,5 @@
 const prismaService = require('../services/prismaService');
+const miningAreaService = require('../services/miningAreaService');
 
 // ==========================================
 // MINING AREA CONTROLLER - PRISMA VERSION
@@ -6,7 +7,8 @@ const prismaService = require('../services/prismaService');
 
 const getMiningAreas = async (req, res) => {
   try {
-    const geoJsonData = await prismaService.getMiningAreasWithGeometry();
+    // Use static GeoJSON data since mining_zones table doesn't exist
+    const geoJsonData = miningAreaService.getMiningAreaData();
     
     res.status(200).json({
       success: true,

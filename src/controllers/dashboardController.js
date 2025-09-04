@@ -1,4 +1,4 @@
-const prismaService = require('../services/prismaService');
+const prismaService = require('../services/simplePrismaService');
 
 // ==========================================
 // DASHBOARD CONTROLLER - PRISMA VERSION

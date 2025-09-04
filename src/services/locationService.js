@@ -68,6 +68,19 @@ const startRealTimeSimulation = (io) => {
           truck.id              // INTEGER truck id
         ]);
         
+        // Insert location history record for tracking
+        await pool.query(`
+          INSERT INTO location_history (truck_id, latitude, longitude, speed, heading, fuel_percentage, recorded_at)
+          VALUES ($1, $2::DECIMAL(10,8), $3::DECIMAL(11,8), $4, $5, $6::DECIMAL(5,2), CURRENT_TIMESTAMP)
+        `, [
+          truck.id,
+          boundedLat,
+          boundedLng, 
+          newSpeed,
+          finalHeading,
+          newFuel
+        ]);
+        
         // Occasionally update tire pressures (10% chance)
         if (Math.random() < 0.1) {
           const pressureChange = parseFloat(((Math.random() - 0.5) * 4).toFixed(1)); // -2.0 to +2.0 PSI
@@ -75,10 +88,10 @@ const startRealTimeSimulation = (io) => {
           await pool.query(`
             UPDATE tire_pressures 
             SET 
-              pressure_psi = GREATEST(50, LEAST(150, pressure_psi + $1::DECIMAL(5,1))),
+              tire_pressure = GREATEST(50, LEAST(150, tire_pressure + $1::DECIMAL(5,1))),
               status = CASE 
-                WHEN pressure_psi + $1::DECIMAL(5,1) < 80 THEN 'low'
-                WHEN pressure_psi + $1::DECIMAL(5,1) > 120 THEN 'high'
+                WHEN tire_pressure + $1::DECIMAL(5,1) < 80 THEN 'low'
+                WHEN tire_pressure + $1::DECIMAL(5,1) > 120 THEN 'high'
                 ELSE 'normal'
               END,
               recorded_at = CURRENT_TIMESTAMP

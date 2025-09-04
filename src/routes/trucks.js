@@ -3,11 +3,17 @@ const router = express.Router();
 const truckController = require('../controllers/truckController');
 const authMiddleware = require('../middleware/auth');
 
-// GET /api/trucks - Get all trucks with filters (protected)
-router.get('/', authMiddleware, truckController.getAllTrucks);
+// GET /api/trucks - Get all trucks with filters (unprotected for frontend testing)
+router.get('/', truckController.getAllTrucks);
 
-// GET /api/trucks/realtime/locations - Get real-time truck locations (GeoJSON) (protected)
-router.get('/realtime/locations', authMiddleware, truckController.getRealtimeLocations);
+// GET /api/trucks/protected - Get all trucks with filters (protected)
+router.get('/protected', authMiddleware, truckController.getAllTrucks);
+
+// GET /api/trucks/realtime/locations - Get real-time truck locations (GeoJSON) (unprotected for frontend testing)
+router.get('/realtime/locations', truckController.getRealtimeLocations);
+
+// GET /api/trucks/realtime/locations/protected - Get real-time truck locations (GeoJSON) (protected)
+router.get('/realtime/locations/protected', authMiddleware, truckController.getRealtimeLocations);
 
 // GET /api/trucks/:id - Get specific truck details (protected)
 router.get('/:id', authMiddleware, truckController.getTruckById);

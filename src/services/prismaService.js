@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient } = require('../../prisma/generated/client');
 
 // Initialize Prisma Client with optimizations
 const prisma = new PrismaClient({
@@ -57,66 +57,70 @@ class PrismaService {
     // Build where clause
     const where = {};
     
-    // Filter by status
+    // Filter by status - using truck status events
     if (status && status !== 'all') {
-      where.status = status;
+      where.truckStatusEvents = {
+        some: {
+          status: status
+        }
+      };
     }
 
     // Search filter
     if (search) {
       where.OR = [
-        { truckNumber: { contains: search, mode: 'insensitive' } },
-        { driverName: { contains: search, mode: 'insensitive' } },
-        { model: { name: { contains: search, mode: 'insensitive' } } }
+        { plateNumber: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' } },
+        { model: { contains: search, mode: 'insensitive' } }
       ];
     }
 
-    // Fuel filters
-    if (minFuel !== undefined) {
-      where.fuelPercentage = { ...where.fuelPercentage, gte: parseFloat(minFuel) };
-    }
-    if (maxFuel !== undefined) {
-      where.fuelPercentage = { ...where.fuelPercentage, lte: parseFloat(maxFuel) };
+    // Fuel filters - using fuel level events
+    if (minFuel !== undefined || maxFuel !== undefined) {
+      const fuelWhere = {};
+      if (minFuel !== undefined) fuelWhere.gte = parseFloat(minFuel);
+      if (maxFuel !== undefined) fuelWhere.lte = parseFloat(maxFuel);
+      
+      where.fuelLevelEvents = {
+        some: {
+          fuelPercent: fuelWhere
+        }
+      };
     }
 
     // Alerts filter
     if (hasAlerts === 'true') {
-      where.alerts = {
-        some: { isResolved: false }
+      where.alertEvents = {
+        some: { acknowledged: false }
       };
     }
-
-    // Only include trucks with coordinates
-    where.AND = [
-      { latitude: { not: null } },
-      { longitude: { not: null } }
-    ];
 
     try {
       // Get trucks with relations
       const trucks = await this.prisma.truck.findMany({
         where,
         include: {
-          model: true,
-          alerts: {
-            where: { isResolved: false },
+          fleetGroup: true,
+          alertEvents: {
+            where: { acknowledged: false },
             select: {
               id: true,
-              alertType: true,
+              type: true,
               severity: true,
-              message: true,
-              createdAt: true
-            }
+              detail: true,
+              occurredAt: true
+            },
+            take: 5
           },
           _count: {
             select: {
-              alerts: {
-                where: { isResolved: false }
+              alertEvents: {
+                where: { acknowledged: false }
               }
             }
           }
         },
-        orderBy: { updatedAt: 'desc' },
+        orderBy: { createdAt: 'desc' },
         skip: offset,
         take: parseInt(limit)
       });
@@ -559,7 +563,7 @@ class PrismaService {
   async optimizeDatabase() {
     try {
       // Analyze tables for better query planning
-      await this.prisma.$executeRaw`ANALYZE trucks, tire_pressures, truck_alerts, location_history`;
+      await this.prisma.$executeRaw`ANALYZE truck, tire_pressure_event, alert_event, gps_position`;
       
       return { message: 'Database optimization completed' };
     } catch (error) {
