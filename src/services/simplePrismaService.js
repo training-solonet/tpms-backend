@@ -66,21 +66,21 @@ class SimplePrismaService {
       const trucks = await this.prisma.truck.findMany({
         where,
         include: {
-          fleetGroup: true,
-          alertEvents: {
+          fleet_group: true,
+          alert_event: {
             where: { acknowledged: false },
             take: 5,
-            orderBy: { occurredAt: 'desc' }
+            orderBy: { occurred_at: 'desc' }
           },
           _count: {
             select: {
-              alertEvents: {
+              alert_event: {
                 where: { acknowledged: false }
               }
             }
           }
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy: { created_at: 'desc' },
         skip: offset,
         take: parseInt(limit)
       });
@@ -274,7 +274,7 @@ class SimplePrismaService {
       const totalTrucks = await this.prisma.truck.count();
       console.log('✅ Total trucks:', totalTrucks);
       
-      const totalAlerts = await this.prisma.alertEvent.count({
+      const totalAlerts = await this.prisma.alert_event.count({
         where: {
           acknowledged: false // Unacknowledged alerts only
         }
@@ -283,47 +283,47 @@ class SimplePrismaService {
       
       // Count trucks by status instead of maintenance orders
       const trucksByStatus = await this.prisma.truck.groupBy({
-        by: ['plateNumber'],
+        by: ['plate_number'],
         _count: {
-          plateNumber: true
+          plate_number: true
         }
       });
       console.log('✅ Trucks by status calculated');
 
       // Get recent GPS positions to determine active trucks
-      const recentPositions = await this.prisma.gpsPosition.findMany({
+      const recentPositions = await this.prisma.gps_position.findMany({
         where: {
           ts: {
             gte: new Date(Date.now() - 30 * 60 * 1000) // Last 30 minutes
           }
         },
         select: {
-          truckId: true,
-          speedKph: true
+          truck_id: true,
+          speed_kph: true
         },
-        distinct: ['truckId']
+        distinct: ['truck_id']
       });
 
       // Calculate truck status distribution
-      const activeTrucks = recentPositions.filter(pos => pos.speedKph > 5).length;
+      const activeTrucks = recentPositions.filter(pos => pos.speed_kph > 5).length;
       const inactiveTrucks = totalTrucks - activeTrucks;
 
       // Get average fuel from recent fuel events
-      const recentFuelEvents = await this.prisma.fuelLevelEvent.findMany({
+      const recentFuelEvents = await this.prisma.fuel_level_event.findMany({
         take: 50,
-        orderBy: { changedAt: 'desc' },
-        select: { fuelPercent: true }
+        orderBy: { changed_at: 'desc' },
+        select: { fuel_percent: true }
       });
 
       const averageFuel = recentFuelEvents.length > 0 
-        ? recentFuelEvents.reduce((sum, event) => sum + (event.fuelPercent || 0), 0) / recentFuelEvents.length
+        ? recentFuelEvents.reduce((sum, event) => sum + (event.fuel_percent || 0), 0) / recentFuelEvents.length
         : 75.0;
 
       // Count low tire pressure alerts
-      const lowTirePressureCount = await this.prisma.tirePressureEvent.count({
+      const lowTirePressureCount = await this.prisma.tire_pressure_event.count({
         where: {
-          pressureKpa: { lt: 200.0 }, // Below 200 kPa (approx 30 PSI)
-          changedAt: {
+          pressure_kpa: { lt: 200.0 }, // Below 200 kPa (approx 30 PSI)
+          changed_at: {
             gte: new Date(Date.now() - 24 * 60 * 60 * 1000) // Last 24 hours
           }
         }

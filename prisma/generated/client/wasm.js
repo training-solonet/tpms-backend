@@ -122,174 +122,237 @@ exports.Prisma.TransactionIsolationLevel = makeStrictEnum({
   Serializable: 'Serializable'
 });
 
-exports.Prisma.FleetGroupScalarFieldEnum = {
+exports.Prisma.Alert_eventScalarFieldEnum = {
   id: 'id',
-  name: 'name',
-  site: 'site',
-  description: 'description',
-  createdAt: 'createdAt',
-  createdBy: 'createdBy',
-  updatedBy: 'updatedBy'
+  truck_id: 'truck_id',
+  type: 'type',
+  severity: 'severity',
+  detail: 'detail',
+  occurred_at: 'occurred_at',
+  acknowledged: 'acknowledged',
+  created_by: 'created_by'
 };
 
-exports.Prisma.TruckScalarFieldEnum = {
+exports.Prisma.Daily_routeScalarFieldEnum = {
   id: 'id',
-  plateNumber: 'plateNumber',
-  vin: 'vin',
-  name: 'name',
-  model: 'model',
-  year: 'year',
-  tireConfig: 'tireConfig',
-  fleetGroupId: 'fleetGroupId',
-  createdAt: 'createdAt',
-  createdBy: 'createdBy',
-  updatedBy: 'updatedBy'
+  truck_id: 'truck_id',
+  route_date: 'route_date',
+  point_count: 'point_count',
+  generated_at: 'generated_at',
+  created_by: 'created_by'
 };
 
 exports.Prisma.DeviceScalarFieldEnum = {
   id: 'id',
-  truckId: 'truckId',
+  truck_id: 'truck_id',
   sn: 'sn',
-  simNumber: 'simNumber',
-  installedAt: 'installedAt',
-  removedAt: 'removedAt',
-  createdBy: 'createdBy',
-  updatedBy: 'updatedBy'
+  sim_number: 'sim_number',
+  installed_at: 'installed_at',
+  removed_at: 'removed_at',
+  created_by: 'created_by',
+  updated_by: 'updated_by'
 };
 
-exports.Prisma.SensorScalarFieldEnum = {
+exports.Prisma.Device_status_eventScalarFieldEnum = {
   id: 'id',
-  deviceId: 'deviceId',
-  type: 'type',
-  positionNo: 'positionNo',
-  sn: 'sn',
-  installedAt: 'installedAt',
-  removedAt: 'removedAt',
-  createdBy: 'createdBy',
-  updatedBy: 'updatedBy'
+  device_id: 'device_id',
+  truck_id: 'truck_id',
+  host_bat: 'host_bat',
+  repeater1_bat: 'repeater1_bat',
+  repeater2_bat: 'repeater2_bat',
+  lock_state: 'lock_state',
+  reported_at: 'reported_at',
+  created_by: 'created_by'
 };
 
-exports.Prisma.TruckStatusEventScalarFieldEnum = {
+exports.Prisma.Device_truck_assignmentScalarFieldEnum = {
   id: 'id',
-  truckId: 'truckId',
-  status: 'status',
-  note: 'note',
-  changedAt: 'changedAt',
-  createdBy: 'createdBy'
+  device_id: 'device_id',
+  truck_id: 'truck_id',
+  assigned_at: 'assigned_at',
+  assigned_by: 'assigned_by',
+  removed_at: 'removed_at',
+  removed_by: 'removed_by',
+  is_active: 'is_active'
+};
+
+exports.Prisma.Fleet_groupScalarFieldEnum = {
+  id: 'id',
+  name: 'name',
+  site: 'site',
+  description: 'description',
+  created_at: 'created_at',
+  created_by: 'created_by',
+  updated_by: 'updated_by'
+};
+
+exports.Prisma.Fuel_level_eventScalarFieldEnum = {
+  id: 'id',
+  truck_id: 'truck_id',
+  fuel_percent: 'fuel_percent',
+  changed_at: 'changed_at',
+  source: 'source',
+  created_by: 'created_by'
 };
 
 exports.Prisma.GeofenceScalarFieldEnum = {
   id: 'id',
   name: 'name',
-  createdBy: 'createdBy',
-  createdAt: 'createdAt'
+  created_by: 'created_by',
+  created_at: 'created_at'
 };
 
-exports.Prisma.GpsPositionScalarFieldEnum = {
+exports.Prisma.Gps_positionScalarFieldEnum = {
   id: 'id',
-  deviceId: 'deviceId',
-  truckId: 'truckId',
+  device_id: 'device_id',
+  truck_id: 'truck_id',
   ts: 'ts',
-  speedKph: 'speedKph',
-  headingDeg: 'headingDeg',
+  speed_kph: 'speed_kph',
+  heading_deg: 'heading_deg',
   hdop: 'hdop',
   source: 'source'
 };
 
-exports.Prisma.TripScalarFieldEnum = {
+exports.Prisma.Hub_temperature_eventScalarFieldEnum = {
   id: 'id',
-  truckId: 'truckId',
-  startTs: 'startTs',
-  endTs: 'endTs'
+  device_id: 'device_id',
+  truck_id: 'truck_id',
+  hub_no: 'hub_no',
+  temp_celsius: 'temp_celsius',
+  ex_type: 'ex_type',
+  battery_level: 'battery_level',
+  changed_at: 'changed_at',
+  created_by: 'created_by'
 };
 
-exports.Prisma.TirePressureEventScalarFieldEnum = {
+exports.Prisma.Lock_eventScalarFieldEnum = {
   id: 'id',
-  deviceId: 'deviceId',
-  truckId: 'truckId',
-  tireNo: 'tireNo',
-  pressureKpa: 'pressureKpa',
-  tempCelsius: 'tempCelsius',
-  exType: 'exType',
-  batteryLevel: 'batteryLevel',
-  changedAt: 'changedAt',
-  createdBy: 'createdBy'
+  device_id: 'device_id',
+  truck_id: 'truck_id',
+  is_lock: 'is_lock',
+  reported_at: 'reported_at',
+  created_by: 'created_by'
 };
 
-exports.Prisma.TireErrorCodeScalarFieldEnum = {
+exports.Prisma.SensorScalarFieldEnum = {
+  id: 'id',
+  device_id: 'device_id',
+  type: 'type',
+  position_no: 'position_no',
+  sn: 'sn',
+  installed_at: 'installed_at',
+  removed_at: 'removed_at',
+  created_by: 'created_by',
+  updated_by: 'updated_by'
+};
+
+exports.Prisma.Sensor_data_rawScalarFieldEnum = {
+  id: 'id',
+  device_sn: 'device_sn',
+  cmd_type: 'cmd_type',
+  truck_id: 'truck_id',
+  tire_no: 'tire_no',
+  raw_json: 'raw_json',
+  processed: 'processed',
+  received_at: 'received_at',
+  processed_at: 'processed_at'
+};
+
+exports.Prisma.Sensor_processing_queueScalarFieldEnum = {
+  id: 'id',
+  raw_data_id: 'raw_data_id',
+  priority: 'priority',
+  attempts: 'attempts',
+  max_attempts: 'max_attempts',
+  error_message: 'error_message',
+  created_at: 'created_at',
+  processed_at: 'processed_at'
+};
+
+exports.Prisma.Spatial_ref_sysScalarFieldEnum = {
+  srid: 'srid',
+  auth_name: 'auth_name',
+  auth_srid: 'auth_srid',
+  srtext: 'srtext',
+  proj4text: 'proj4text'
+};
+
+exports.Prisma.Speed_eventScalarFieldEnum = {
+  id: 'id',
+  truck_id: 'truck_id',
+  speed_kph: 'speed_kph',
+  changed_at: 'changed_at',
+  source: 'source',
+  created_by: 'created_by'
+};
+
+exports.Prisma.Tire_error_codeScalarFieldEnum = {
   code: 'code',
   description: 'description'
 };
 
-exports.Prisma.HubTemperatureEventScalarFieldEnum = {
+exports.Prisma.Tire_position_configScalarFieldEnum = {
   id: 'id',
-  deviceId: 'deviceId',
-  truckId: 'truckId',
-  hubNo: 'hubNo',
-  tempCelsius: 'tempCelsius',
-  exType: 'exType',
-  batteryLevel: 'batteryLevel',
-  changedAt: 'changedAt',
-  createdBy: 'createdBy'
+  truck_id: 'truck_id',
+  tire_no: 'tire_no',
+  position_name: 'position_name',
+  wheel_type: 'wheel_type',
+  is_active: 'is_active',
+  created_at: 'created_at'
 };
 
-exports.Prisma.FuelLevelEventScalarFieldEnum = {
+exports.Prisma.Tire_pressure_eventScalarFieldEnum = {
   id: 'id',
-  truckId: 'truckId',
-  fuelPercent: 'fuelPercent',
-  changedAt: 'changedAt',
-  source: 'source',
-  createdBy: 'createdBy'
+  device_id: 'device_id',
+  truck_id: 'truck_id',
+  tire_no: 'tire_no',
+  pressure_kpa: 'pressure_kpa',
+  temp_celsius: 'temp_celsius',
+  ex_type: 'ex_type',
+  battery_level: 'battery_level',
+  changed_at: 'changed_at',
+  created_by: 'created_by'
 };
 
-exports.Prisma.SpeedEventScalarFieldEnum = {
+exports.Prisma.TripScalarFieldEnum = {
   id: 'id',
-  truckId: 'truckId',
-  speedKph: 'speedKph',
-  changedAt: 'changedAt',
-  source: 'source',
-  createdBy: 'createdBy'
+  truck_id: 'truck_id',
+  start_ts: 'start_ts',
+  end_ts: 'end_ts'
 };
 
-exports.Prisma.AlertEventScalarFieldEnum = {
+exports.Prisma.TruckScalarFieldEnum = {
   id: 'id',
-  truckId: 'truckId',
-  type: 'type',
-  severity: 'severity',
-  detail: 'detail',
-  occurredAt: 'occurredAt',
-  acknowledged: 'acknowledged',
-  createdBy: 'createdBy'
+  plate_number: 'plate_number',
+  vin: 'vin',
+  name: 'name',
+  model: 'model',
+  year: 'year',
+  tire_config: 'tire_config',
+  fleet_group_id: 'fleet_group_id',
+  created_at: 'created_at',
+  created_by: 'created_by',
+  updated_by: 'updated_by'
 };
 
-exports.Prisma.DeviceStatusEventScalarFieldEnum = {
+exports.Prisma.Truck_status_eventScalarFieldEnum = {
   id: 'id',
-  deviceId: 'deviceId',
-  truckId: 'truckId',
-  hostBat: 'hostBat',
-  repeater1Bat: 'repeater1Bat',
-  repeater2Bat: 'repeater2Bat',
-  lockState: 'lockState',
-  reportedAt: 'reportedAt',
-  createdBy: 'createdBy'
+  truck_id: 'truck_id',
+  status: 'status',
+  note: 'note',
+  changed_at: 'changed_at',
+  created_by: 'created_by'
 };
 
-exports.Prisma.LockEventScalarFieldEnum = {
+exports.Prisma.UsersScalarFieldEnum = {
   id: 'id',
-  deviceId: 'deviceId',
-  truckId: 'truckId',
-  isLock: 'isLock',
-  reportedAt: 'reportedAt',
-  createdBy: 'createdBy'
-};
-
-exports.Prisma.DailyRouteScalarFieldEnum = {
-  id: 'id',
-  truckId: 'truckId',
-  routeDate: 'routeDate',
-  pointCount: 'pointCount',
-  generatedAt: 'generatedAt',
-  createdBy: 'createdBy'
+  username: 'username',
+  email: 'email',
+  password_hash: 'password_hash',
+  role: 'role',
+  is_active: 'is_active',
+  created_at: 'created_at',
+  updated_at: 'updated_at'
 };
 
 exports.Prisma.SortOrder = {
@@ -302,14 +365,13 @@ exports.Prisma.NullableJsonNullValueInput = {
   JsonNull: Prisma.JsonNull
 };
 
+exports.Prisma.JsonNullValueInput = {
+  JsonNull: Prisma.JsonNull
+};
+
 exports.Prisma.QueryMode = {
   default: 'default',
   insensitive: 'insensitive'
-};
-
-exports.Prisma.NullsOrder = {
-  first: 'first',
-  last: 'last'
 };
 
 exports.Prisma.JsonNullValueFilter = {
@@ -317,13 +379,12 @@ exports.Prisma.JsonNullValueFilter = {
   JsonNull: Prisma.JsonNull,
   AnyNull: Prisma.AnyNull
 };
-exports.TruckStatus = exports.$Enums.TruckStatus = {
-  active: 'active',
-  inactive: 'inactive',
-  maintenance: 'maintenance'
-};
 
-exports.AlertType = exports.$Enums.AlertType = {
+exports.Prisma.NullsOrder = {
+  first: 'first',
+  last: 'last'
+};
+exports.alert_type = exports.$Enums.alert_type = {
   LOW_TIRE: 'LOW_TIRE',
   SPEEDING: 'SPEEDING',
   IDLE: 'IDLE',
@@ -334,24 +395,36 @@ exports.AlertType = exports.$Enums.AlertType = {
   DEVICE_LOST: 'DEVICE_LOST'
 };
 
+exports.truck_status = exports.$Enums.truck_status = {
+  active: 'active',
+  inactive: 'inactive',
+  maintenance: 'maintenance'
+};
+
 exports.Prisma.ModelName = {
-  FleetGroup: 'FleetGroup',
-  Truck: 'Truck',
-  Device: 'Device',
-  Sensor: 'Sensor',
-  TruckStatusEvent: 'TruckStatusEvent',
-  Geofence: 'Geofence',
-  GpsPosition: 'GpsPosition',
-  Trip: 'Trip',
-  TirePressureEvent: 'TirePressureEvent',
-  TireErrorCode: 'TireErrorCode',
-  HubTemperatureEvent: 'HubTemperatureEvent',
-  FuelLevelEvent: 'FuelLevelEvent',
-  SpeedEvent: 'SpeedEvent',
-  AlertEvent: 'AlertEvent',
-  DeviceStatusEvent: 'DeviceStatusEvent',
-  LockEvent: 'LockEvent',
-  DailyRoute: 'DailyRoute'
+  alert_event: 'alert_event',
+  daily_route: 'daily_route',
+  device: 'device',
+  device_status_event: 'device_status_event',
+  device_truck_assignment: 'device_truck_assignment',
+  fleet_group: 'fleet_group',
+  fuel_level_event: 'fuel_level_event',
+  geofence: 'geofence',
+  gps_position: 'gps_position',
+  hub_temperature_event: 'hub_temperature_event',
+  lock_event: 'lock_event',
+  sensor: 'sensor',
+  sensor_data_raw: 'sensor_data_raw',
+  sensor_processing_queue: 'sensor_processing_queue',
+  spatial_ref_sys: 'spatial_ref_sys',
+  speed_event: 'speed_event',
+  tire_error_code: 'tire_error_code',
+  tire_position_config: 'tire_position_config',
+  tire_pressure_event: 'tire_pressure_event',
+  trip: 'trip',
+  truck: 'truck',
+  truck_status_event: 'truck_status_event',
+  users: 'users'
 };
 
 /**
