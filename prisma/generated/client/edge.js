@@ -435,7 +435,7 @@ const config = {
       "value": "prisma-client-js"
     },
     "output": {
-      "value": "D:\\www\\tpms-backend\\prisma\\generated\\client",
+      "value": "C:\\tpms-backend\\prisma\\generated\\client",
       "fromEnvVar": null
     },
     "config": {
@@ -451,11 +451,12 @@ const config = {
     "previewFeatures": [
       "postgresqlExtensions"
     ],
-    "sourceFilePath": "D:\\www\\tpms-backend\\prisma\\schema.prisma",
+    "sourceFilePath": "C:\\tpms-backend\\prisma\\schema.prisma",
     "isCustomOutput": true
   },
   "relativeEnvPaths": {
-    "rootEnvPath": null
+    "rootEnvPath": null,
+    "schemaEnvPath": "../../../.env"
   },
   "relativePath": "../..",
   "clientVersion": "5.22.0",

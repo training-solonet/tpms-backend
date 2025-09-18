@@ -197,55 +197,53 @@ class SimplePrismaService {
     try {
       const where = {};
 
-      // Get latest GPS positions for trucks
-      const trucks = await this.prisma.truck.findMany({
-        where,
-        include: {
-          fleet_group: true,
-          gps_position: {
-            orderBy: { ts: 'desc' },
-            take: 1,
-          },
-          _count: {
-            select: {
-              alert_event: {
-                where: { acknowledged: false },
-              },
-            },
-          },
-        },
-        orderBy: { created_at: 'desc' },
-      });
+      // Get latest GPS positions with coordinates using raw query for PostGIS
+      const trucksWithLocations = await this.prisma.$queryRaw`
+        SELECT DISTINCT ON (t.id)
+          t.id,
+          t.name,
+          t.model,
+          fg.name as fleet_group_name,
+          gp.speed_kph,
+          gp.heading_deg,
+          gp.ts,
+          ST_X(gp.pos) as longitude,
+          ST_Y(gp.pos) as latitude,
+          (SELECT COUNT(*) FROM alert_event ae WHERE ae.truck_id = t.id AND ae.acknowledged = false) as alert_count
+        FROM truck t
+        LEFT JOIN fleet_group fg ON t.fleet_group_id = fg.id
+        LEFT JOIN gps_position gp ON t.id = gp.truck_id
+        WHERE gp.pos IS NOT NULL
+        ORDER BY t.id, gp.ts DESC
+      `;
 
       // Format as GeoJSON
       const geoJsonData = {
         type: 'FeatureCollection',
-        features: trucks
-          .filter((truck) => truck.gps_position.length > 0)
-          .map((truck) => {
-            const latestGps = truck.gps_position[0];
-            return {
-              type: 'Feature',
-              properties: {
-                id: truck.id,
-                truckNumber: truck.name,
-                name: truck.name,
-                model: truck.model,
-                status: 'active', // Default status
-                speed: latestGps.speedKph || 0,
-                heading: latestGps.headingDeg || 0,
-                fuel: 75, // Default fuel level
-                payload: 0, // Default payload
-                driver: null,
-                lastUpdate: latestGps.ts,
-                alertCount: truck._count.alert_event,
-              },
-              geometry: {
-                type: 'Point',
-                coordinates: [0, 0], // Will be updated with actual coordinates from PostGIS
-              },
-            };
-          }),
+        features: trucksWithLocations.map((truck) => ({
+          type: 'Feature',
+          properties: {
+            id: truck.id,
+            truckNumber: truck.name,
+            name: truck.name,
+            model: truck.model,
+            status: 'active',
+            speed: truck.speed_kph || 0,
+            heading: truck.heading_deg || 0,
+            fuel: 75, // Default fuel level
+            payload: 0, // Default payload
+            driver: null,
+            lastUpdate: truck.ts,
+            alertCount: parseInt(truck.alert_count) || 0,
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: [
+              parseFloat(truck.longitude) || 0,
+              parseFloat(truck.latitude) || 0
+            ],
+          },
+        })),
       };
 
       return geoJsonData;

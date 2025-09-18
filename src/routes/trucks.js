@@ -6,6 +6,9 @@ const authMiddleware = require('../middleware/auth');
 // GET /api/trucks - Get all trucks with filters
 router.get('/', authMiddleware, truckController.getAllTrucks);
 
+// POST /api/trucks/list - Get all trucks via POST (proxy workaround)
+router.post('/list', truckController.getAllTrucksPost);
+
 // GET /api/trucks/realtime/locations - Get real-time truck locations (GeoJSON)
 router.get('/realtime/locations', authMiddleware, truckController.getRealtimeLocations);
 

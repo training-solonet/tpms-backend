@@ -40,6 +40,66 @@ const getAllTrucks = async (req, res) => {
   }
 };
 
+const getAllTrucksPost = async (req, res) => {
+  try {
+    // Verify token from request body
+    const { token } = req.body;
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Token required in request body',
+      });
+    }
+
+    // Verify JWT token
+    const jwt = require('jsonwebtoken');
+    const { JWT_SECRET } = require('../config/jwt');
+    
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      req.user = decoded; // Set user for logging
+    } catch (error) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired token',
+      });
+    }
+
+    // Get filters from request body instead of query
+    const filters = {
+      status: req.body.status,
+      page: parseInt(req.body.page) || 1,
+      limit: parseInt(req.body.limit) || 50,
+      search: req.body.search,
+      minFuel: req.body.minFuel ? parseFloat(req.body.minFuel) : undefined,
+      maxFuel: req.body.maxFuel ? parseFloat(req.body.maxFuel) : undefined,
+      hasAlerts: req.body.hasAlerts,
+      vendor: req.body.vendor,
+      vendorId: req.body.vendorId,
+    };
+
+    // Validate limit (prevent excessive queries)
+    if (filters.limit > 200) {
+      filters.limit = 200;
+    }
+
+    const result = await prismaService.getAllTrucks(filters);
+
+    res.status(200).json({
+      success: true,
+      data: result,
+      message: `Retrieved ${result.trucks.length} trucks successfully (POST method)`,
+    });
+  } catch (error) {
+    console.error('Error in getAllTrucksPost:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch trucks',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
+    });
+  }
+};
+
 const getTruckById = async (req, res) => {
   try {
     const truckId = req.params.id; // UUID expected
@@ -551,4 +611,5 @@ module.exports = {
   resolveAlert,
   bulkUpdateTruckStatus,
   getTruckLocationsByName,
+  getAllTrucksPost,
 };

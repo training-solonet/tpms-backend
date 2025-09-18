@@ -547,23 +547,22 @@ class WebSocketServer {
     console.log('📡 Real-time broadcasts started');
   }
 
-  // ==========================================
-  // DATA SERVICE METHODS
-  // ==========================================
-
   async getTrucks(filters = {}) {
     if (!this.isReady) throw new Error('Database not ready');
 
     return await prismaService.prisma.truck.findMany({
       where: filters,
       include: {
-        currentLocation: true,
-        alerts: {
-          where: { isResolved: false }
+        gps_position: {
+          orderBy: { ts: 'desc' },
+          take: 1
+        },
+        alert_event: {
+          where: { acknowledged: false }
         }
       },
       orderBy: {
-        truckNumber: 'asc'
+        name: 'asc'
       }
     });
   }
@@ -574,14 +573,17 @@ class WebSocketServer {
     return await prismaService.prisma.truck.findUnique({
       where: { id: truckId },
       include: {
-        currentLocation: true,
-        alerts: {
-          orderBy: { createdAt: 'desc' },
+        gps_position: {
+          orderBy: { ts: 'desc' },
+          take: 1
+        },
+        alert_event: {
+          orderBy: { occurred_at: 'desc' },
           take: 10
         },
-        maintenanceRecords: {
-          orderBy: { scheduledDate: 'desc' },
-          take: 5
+        tire_pressure_event: {
+          orderBy: { changed_at: 'desc' },
+          take: 10
         }
       }
     });
@@ -655,7 +657,7 @@ class WebSocketServer {
   async resolveAlert(alertId) {
     if (!this.isReady) throw new Error('Database not ready');
 
-    return await prismaService.prisma.alertEvent.update({
+    return await prismaService.prisma.alert_event.update({
       where: { id: alertId },
       data: {
         acknowledged: true
@@ -737,16 +739,32 @@ const startServer = async () => {
       console.log(`🌐 HTTP API server running on port ${PORT}`);
       console.log(`📡 WebSocket server running on port ${PORT}`);
       console.log(`🌍 Environment: ${NODE_ENV}`);
-      console.log(`🔗 API URL: http://0.0.0.0:${PORT}/api`);
-      console.log(`🔗 WebSocket URL: ws://0.0.0.0:${PORT}/ws`);
-      console.log(`🌐 Network Access: Server accessible from other networks`);
+      
+      if (NODE_ENV === 'production') {
+        console.log(`🔗 API URL: https://be-tpms.connectis.my.id/api`);
+        console.log(`🔗 WebSocket URL: wss://be-tpms.connectis.my.id/ws`);
+        console.log(`🌐 Production server: be-tpms.connectis.my.id`);
+      } else {
+        console.log(`🔗 API URL: http://localhost:${PORT}/api`);
+        console.log(`🔗 WebSocket URL: ws://localhost:${PORT}/ws`);
+        console.log(`🌐 Development server: localhost:${PORT}`);
+      }
+      
       console.log('🚀 ================================');
 
       // Log server startup
+      const apiUrl = NODE_ENV === 'production' 
+        ? 'https://be-tpms.connectis.my.id/api'
+        : `http://localhost:${PORT}/api`;
+      const websocketUrl = NODE_ENV === 'production'
+        ? 'wss://be-tpms.connectis.my.id/ws'
+        : `ws://localhost:${PORT}/ws`;
+        
       logServerStartup({
         port: PORT,
         environment: NODE_ENV,
-        websocketUrl: `ws://0.0.0.0:${PORT}/ws`,
+        apiUrl: apiUrl,
+        websocketUrl: websocketUrl,
         databaseStatus: wsServer.isReady ? 'connected' : 'disconnected',
         startupTime: bootTime,
         adminId: 'system',

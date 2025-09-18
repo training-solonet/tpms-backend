@@ -89,6 +89,7 @@ const logServerStartup = (serverInfo) => {
     action: 'SERVER_STARTUP',
     port: serverInfo.port,
     environment: serverInfo.environment,
+    apiUrl: serverInfo.apiUrl,
     websocketUrl: serverInfo.websocketUrl,
     databaseStatus: serverInfo.databaseStatus,
     startupTime: serverInfo.startupTime,

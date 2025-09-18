@@ -10,6 +10,12 @@ const driverRoutes = require('./drivers');
 
 const router = express.Router();
 
+// Debug middleware for routes
+router.use((req, res, next) => {
+  console.log(`🔍 API Router - ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 router.use('/auth', authRoutes);
 router.use('/trucks', truckRoutes);
 router.use('/dashboard', dashboardRoutes);

@@ -4,13 +4,20 @@ const { validationResult } = require('express-validator');
 const prismaService = require('../services/simplePrismaService');
 const { logAdminActivity, logAdminOperation, logSecurityEvent } = require('../utils/adminLogger');
 const { broadcastAdminActivity } = require('../services/websocketService');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'fleet-management-secret-key-change-in-production';
+const { JWT_SECRET, JWT_EXPIRES_IN } = require('../config/jwt');
 
 const login = async (req, res) => {
   try {
+    console.log('🔐 Login attempt:', { 
+      username: req.body?.username, 
+      hasPassword: !!req.body?.password,
+      origin: req.get('Origin'),
+      userAgent: req.get('User-Agent')
+    });
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('❌ Validation errors:', errors.array());
       return res.status(400).json({
         success: false,
         message: 'Validation error',
@@ -19,6 +26,14 @@ const login = async (req, res) => {
     }
 
     const { username, password } = req.body;
+
+    if (!username || !password) {
+      console.log('❌ Missing credentials');
+      return res.status(400).json({
+        success: false,
+        message: 'Username and password are required',
+      });
+    }
 
     // Find user by username or email using Prisma
     let user;
@@ -79,7 +94,7 @@ const login = async (req, res) => {
       });
     }
 
-    // Generate JWT token
+    // Generate JWT token (centralized config)
     const token = jwt.sign(
       {
         userId: user.id,
@@ -87,7 +102,7 @@ const login = async (req, res) => {
         role: user.role,
       },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: JWT_EXPIRES_IN }
     );
 
     // Update last login (optional) - skip if users table doesn't exist
@@ -235,8 +250,57 @@ const getCurrentUser = async (req, res) => {
   }
 };
 
+const verifyTokenPost = async (req, res) => {
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token is required in request body',
+      });
+    }
+    
+    // Verify the token
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
+    res.json({
+      success: true,
+      message: 'Token is valid',
+      data: {
+        userId: decoded.userId,
+        username: decoded.username,
+        role: decoded.role,
+        exp: decoded.exp,
+        iat: decoded.iat
+      }
+    });
+  } catch (error) {
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token has expired',
+      });
+    }
+    
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token',
+      });
+    }
+    
+    console.error('Token verification error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Token verification failed',
+    });
+  }
+};
+
 module.exports = {
   login,
   verifyToken,
+  verifyTokenPost,
   getCurrentUser,
 };

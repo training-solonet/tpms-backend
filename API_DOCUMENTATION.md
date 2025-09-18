@@ -1,6 +1,6 @@
 # Fleet Management API Documentation
 
-Base URL: `http://localhost:3001`
+Base URL: `https://be-tpms.connectis.my.id`
 
 ## Authentication
 
@@ -523,7 +523,7 @@ Authorization: Bearer <token>
 
 Connect to WebSocket for real-time updates:
 ```
-ws://localhost:3001
+wss://be-tpms.connectis.my.id/ws
 ```
 
 **Subscription Messages:**

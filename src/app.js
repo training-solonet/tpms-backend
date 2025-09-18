@@ -13,21 +13,44 @@ app.use(helmet());
 app.use(compression());
 
 // CORS configuration
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : ['https://connectis.my.id', 'https://be-tpms.connectis.my.id', 'http://localhost:5173', 'http://localhost:3000'];
+
+console.log('🔒 CORS allowed origins:', allowedOrigins);
+
 app.use(
   cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        console.log('❌ CORS blocked origin:', origin);
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true,
+    optionsSuccessStatus: 200 // Some legacy browsers choke on 204
   })
 );
 
 // Body parsing middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Request logging middleware
 app.use(requestLogger);
+
+// Debug middleware to log all requests
+app.use((req, res, next) => {
+  console.log(`📝 ${req.method} ${req.originalUrl} - Origin: ${req.get('Origin') || 'none'}`);
+  next();
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -37,6 +60,11 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     server_ip: req.socket.localAddress,
     client_ip: req.ip,
+    headers: Object.keys(req.headers),
+    authorization_present: !!req.headers.authorization,
+    query_params: req.query,
+    full_url: req.url,
+    original_url: req.originalUrl
   });
 });
 
@@ -60,15 +88,32 @@ app.get('/', (req, res) => {
   });
 });
 
+// Test route to verify API mounting
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'API routes are working', timestamp: new Date().toISOString() });
+});
+
 // API routes
+console.log('🔗 Mounting API routes on /api');
 app.use('/api', routes);
+
+// Routes listing removed for cleaner logs
 
 // 404 handler
 app.use('*', (req, res) => {
+  console.log(`❌ 404 - ${req.method} ${req.originalUrl} not found`);
   res.status(404).json({
     success: false,
     message: 'Endpoint not found',
     path: req.originalUrl,
+    method: req.method,
+    availableEndpoints: [
+      'GET /health',
+      'GET /',
+      'POST /api/auth/login',
+      'GET /api/trucks',
+      'GET /api/dashboard/stats'
+    ]
   });
 });
 
